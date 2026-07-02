@@ -16,6 +16,14 @@ import uuid
 import time
 from flask import Flask, request, jsonify
 from card_engine import create_session, verify_answer, calculate_true_count, MIN_CARDS
+from strategy_engine import (
+    create_session as create_strategy_session,
+    apply_action as apply_strategy_action,
+    public_session_view,
+    MIN_HANDS,
+    MAX_HANDS,
+)
+from basic_strategy import HIT, STAND, DOUBLE, SPLIT
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -26,6 +34,9 @@ _HTML_PATH = os.path.join(os.path.dirname(__file__), 'static', 'index.html')
 _SESSIONS: dict[str, dict] = {}
 SESSION_TTL_SECONDS = 3600  # 1 hour
 
+# Separate in-memory store for Basic Strategy hand-play sessions.
+_STRATEGY_SESSIONS: dict[str, dict] = {}
+
 
 def _purge_expired_sessions() -> None:
     """Remove sessions older than SESSION_TTL_SECONDS."""
@@ -33,6 +44,14 @@ def _purge_expired_sessions() -> None:
     expired = [sid for sid, data in _SESSIONS.items() if data['created_at'] < cutoff]
     for sid in expired:
         del _SESSIONS[sid]
+
+
+def _purge_expired_strategy_sessions() -> None:
+    """Remove strategy sessions older than SESSION_TTL_SECONDS."""
+    cutoff = time.time() - SESSION_TTL_SECONDS
+    expired = [sid for sid, data in _STRATEGY_SESSIONS.items() if data['created_at'] < cutoff]
+    for sid in expired:
+        del _STRATEGY_SESSIONS[sid]
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -128,6 +147,68 @@ def verify():
     result['total_shoe_size'] = game_data['total_shoe_size']
 
     return jsonify(result)
+
+
+@app.post('/api/strategy/session')
+def new_strategy_session():
+    """Start a new Basic Strategy hand-play session."""
+    _purge_expired_strategy_sessions()
+
+    data        = request.get_json(silent=True) or {}
+    num_decks   = data.get('num_decks', 4)
+    num_hands   = data.get('num_hands', 10)
+    penetration = data.get('penetration', 0.75)
+
+    if not isinstance(num_decks, int) or not (1 <= num_decks <= 8):
+        return jsonify(error="num_decks must be an integer between 1 and 8"), 400
+    if not isinstance(num_hands, int) or not (MIN_HANDS <= num_hands <= MAX_HANDS):
+        return jsonify(
+            error=f"num_hands must be an integer between {MIN_HANDS} and {MAX_HANDS}"
+        ), 400
+    if not isinstance(penetration, (int, float)) or not (0 < penetration <= 1):
+        return jsonify(error="penetration must be a number between 0 (exclusive) and 1"), 400
+
+    try:
+        state = create_strategy_session(
+            num_decks=num_decks, num_hands=num_hands, penetration=penetration,
+        )
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    session_id = str(uuid.uuid4())
+    state['created_at'] = time.time()
+    _STRATEGY_SESSIONS[session_id] = state
+
+    return jsonify({'session_id': session_id, **public_session_view(state)})
+
+
+@app.post('/api/strategy/action')
+def strategy_action():
+    """Apply a Hit/Stand/Double/Split decision to the active hand."""
+    _purge_expired_strategy_sessions()
+
+    data       = request.get_json(silent=True) or {}
+    session_id = data.get('session_id')
+    action     = data.get('action')
+
+    if not session_id or session_id not in _STRATEGY_SESSIONS:
+        return jsonify(error="Invalid or expired session — start a new game first"), 400
+    if action not in (HIT, STAND, DOUBLE, SPLIT):
+        return jsonify(error=f"action must be one of {HIT!r}, {STAND!r}, {DOUBLE!r}, {SPLIT!r}"), 400
+
+    state = _STRATEGY_SESSIONS[session_id]
+
+    try:
+        result = apply_strategy_action(state, action)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    if state['done']:
+        del _STRATEGY_SESSIONS[session_id]
+    else:
+        state['created_at'] = time.time()  # keep session alive while actively playing
+
+    return jsonify({'result': result, 'session': public_session_view(state)})
 
 
 if __name__ == '__main__':

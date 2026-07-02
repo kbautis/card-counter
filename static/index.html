@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Card Counter Trainer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <style>
   :root {
     --bg: #0f1923;
@@ -41,6 +42,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
   }
 
   header h1 {
@@ -55,6 +58,28 @@
     color: var(--muted);
   }
 
+  .mode-tabs {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .tab-btn {
+    background: var(--surface-2);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .tab-btn.active {
+    background: rgba(245,158,11,0.15);
+    color: var(--gold);
+    border-color: rgba(245,158,11,0.4);
+  }
+
   main {
     width: 100%;
     max-width: 720px;
@@ -63,6 +88,9 @@
     flex-direction: column;
     gap: 1.5rem;
   }
+
+  .view { display: none; flex-direction: column; gap: 1.5rem; }
+  .view.active { display: flex; }
 
   /* ── Setup panel ── */
   .setup-panel {
@@ -154,6 +182,9 @@
   .btn-danger    { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
   .btn-hint      { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); font-size: 0.8rem; padding: 0.4rem 0.9rem; }
   .btn-hint.active { background: rgba(245,158,11,0.15); color: var(--gold); border-color: rgba(245,158,11,0.4); }
+
+  .action-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  .action-row .btn { flex: 1; min-width: 90px; width: auto; }
 
   /* ── Game area ── */
   .game-area { display: none; flex-direction: column; gap: 1.5rem; }
@@ -264,7 +295,6 @@
     transition: opacity 0.2s;
   }
 
-  /* Badge is shown only when both .visible (card showing) and hints are on */
   .hilo-badge.show-hint.visible { opacity: 1; }
   .hilo-plus  { background: rgba(34,197,94,0.2);  color: var(--green); }
   .hilo-zero  { background: rgba(100,116,139,0.2); color: var(--muted); }
@@ -329,6 +359,7 @@
 
   .result-title.correct { color: var(--green); }
   .result-title.wrong   { color: var(--red); }
+  .result-title.push    { color: var(--gold); }
 
   .result-detail {
     font-size: 0.95rem;
@@ -372,7 +403,7 @@
     padding: 1rem 1.25rem;
     font-size: 0.82rem;
     color: var(--muted);
-    display: none;   /* hidden by default; shown when hints are toggled on */
+    display: none;
     gap: 1.5rem;
     flex-wrap: wrap;
     justify-content: center;
@@ -383,16 +414,142 @@
   .dot-green { background: var(--green); }
   .dot-gray  { background: var(--muted); }
   .dot-red   { background: var(--red); }
+
+  /* ── Basic Strategy table ── */
+  .table-stage {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .hand-block { display: flex; flex-direction: column; gap: 0.6rem; }
+
+  .hand-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .hand-label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .hand-total { font-size: 1.1rem; font-weight: 700; color: var(--gold); }
+
+  .hand-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; min-height: 88px; }
+
+  .mini-card {
+    width: 58px;
+    height: 84px;
+    background: var(--card-bg);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    animation: flipIn 0.2s ease-out;
+    flex-shrink: 0;
+  }
+
+  .mini-card .r { font-size: 1.05rem; font-weight: 800; }
+  .mini-card .s { font-size: 1.2rem; }
+
+  .mini-card.red .r, .mini-card.red .s   { color: var(--card-red); }
+  .mini-card.black .r, .mini-card.black .s { color: var(--card-black); }
+
+  .mini-card.back {
+    background: repeating-linear-gradient(45deg, #243447, #243447 6px, #1a2634 6px, #1a2634 12px);
+    border: 2px solid var(--gold);
+  }
+
+  .strat-feedback {
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .strat-feedback.correct { background: rgba(34,197,94,0.12); color: var(--green); }
+  .strat-feedback.wrong   { background: rgba(239,68,68,0.12); color: var(--red); }
+
+  .strat-outcome {
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .strat-outcome strong { color: var(--text); }
+
+  /* ── History view ── */
+  .history-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+
+  .history-stat {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .history-stat .val { font-size: 1.4rem; font-weight: 700; color: var(--gold); }
+  .history-stat .lbl { font-size: 0.75rem; color: var(--muted); }
+
+  .chart-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+  }
+
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+
+  .history-table th {
+    text-align: left;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .history-table td {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .empty-note {
+    color: var(--muted);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 1.5rem;
+  }
 </style>
 </head>
 <body>
 
 <header>
   <h1>🃏 Card Counter Trainer</h1>
-  <span class="hint">Hi-Lo System</span>
+  <nav class="mode-tabs">
+    <button class="tab-btn active" data-mode="count">Count Trainer</button>
+    <button class="tab-btn" data-mode="strategy">Basic Strategy</button>
+    <button class="tab-btn" data-mode="history">History</button>
+  </nav>
 </header>
 
 <main>
+
+<!-- ══════════════════════ COUNT TRAINER VIEW ══════════════════════ -->
+<div class="view active" id="view-count">
 
   <!-- Setup -->
   <div class="setup-panel" id="setupPanel">
@@ -420,21 +577,25 @@
       </div>
     </div>
     <div class="controls">
-      <div class="control-group" style="grid-column: span 2;">
+      <div class="control-group">
+        <label for="penetration">Penetration</label>
+        <select id="penetration">
+          <option value="1" selected>Full shoe (100%)</option>
+          <option value="0.75">Deep (75%)</option>
+          <option value="0.5">Medium (50%)</option>
+          <option value="0.25">Shallow (25%)</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
+      <div class="control-group" id="numCardsGroup" style="display:none">
         <div class="label-row">
           <label for="numCards">Cards to Deal</label>
           <span class="label-hint" id="numCardsHint">max 208</span>
         </div>
-        <input
-          type="number"
-          id="numCards"
-          placeholder="Full shoe (208 cards)"
-          min="5"
-          max="208"
-          step="1"
-        >
+        <input type="number" id="numCards" placeholder="Full shoe (208 cards)" min="5" max="208" step="1">
       </div>
     </div>
+    <p class="label-hint" id="penetrationSummary">Full shoe — 208 of 208 cards dealt.</p>
     <button class="btn btn-primary" id="startBtn">Start Game</button>
   </div>
 
@@ -492,11 +653,273 @@
     <button class="btn btn-secondary" id="playAgainBtn" style="margin-top:0.5rem">Play Again</button>
   </div>
 
+</div>
+
+<!-- ══════════════════════ BASIC STRATEGY VIEW ══════════════════════ -->
+<div class="view" id="view-strategy">
+
+  <div class="setup-panel" id="stratSetupPanel">
+    <h2>Basic Strategy Setup</h2>
+    <div class="controls three-col">
+      <div class="control-group">
+        <label for="stratNumDecks">Number of Decks</label>
+        <select id="stratNumDecks">
+          <option value="1">1 deck</option>
+          <option value="2">2 decks</option>
+          <option value="4" selected>4 decks</option>
+          <option value="6">6 decks</option>
+          <option value="8">8 decks</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="stratNumHands">Number of Hands</label>
+        <select id="stratNumHands">
+          <option value="5">5 hands</option>
+          <option value="10" selected>10 hands</option>
+          <option value="20">20 hands</option>
+          <option value="50">50 hands</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="stratPenetration">Penetration</label>
+        <select id="stratPenetration">
+          <option value="1">Full shoe (100%)</option>
+          <option value="0.75" selected>Deep (75%)</option>
+          <option value="0.5">Medium (50%)</option>
+          <option value="0.25">Shallow (25%)</option>
+        </select>
+      </div>
+    </div>
+    <p class="label-hint">Dealer stands on soft 17. Splits are scored for the decision but not replayed as two hands.</p>
+    <button class="btn btn-primary" id="stratStartBtn">Start Hands</button>
+  </div>
+
+  <div class="game-area" id="stratGameArea">
+    <div class="progress-info">
+      <span id="stratHandCounter">Hand 1 of 10</span>
+      <span id="stratAccuracy">Accuracy: —</span>
+    </div>
+
+    <div class="table-stage">
+      <div class="hand-block">
+        <div class="hand-label-row">
+          <span class="hand-label">Dealer</span>
+          <span class="hand-total" id="stratDealerTotal"></span>
+        </div>
+        <div class="hand-row" id="stratDealerCards"></div>
+      </div>
+      <div class="hand-block">
+        <div class="hand-label-row">
+          <span class="hand-label">You</span>
+          <span class="hand-total" id="stratPlayerTotal"></span>
+        </div>
+        <div class="hand-row" id="stratPlayerCards"></div>
+      </div>
+    </div>
+
+    <div class="strat-feedback" id="stratFeedback" style="display:none"></div>
+    <div class="strat-outcome" id="stratOutcome" style="display:none"></div>
+
+    <div class="action-row" id="stratActions">
+      <button class="btn btn-primary"   id="actHit">Hit</button>
+      <button class="btn btn-primary"   id="actStand">Stand</button>
+      <button class="btn btn-secondary" id="actDouble">Double</button>
+      <button class="btn btn-secondary" id="actSplit">Split</button>
+    </div>
+    <button class="btn btn-secondary" id="stratNextBtn" style="display:none">Next Hand →</button>
+    <button class="btn btn-secondary" id="stratBackBtn">← Back to Menu</button>
+  </div>
+
+  <div class="result-panel" id="stratSummaryPanel">
+    <div class="result-icon">📊</div>
+    <div class="result-title" id="stratSummaryTitle">Session Complete</div>
+    <div class="result-stats" id="stratSummaryStats"></div>
+    <button class="btn btn-secondary" id="stratPlayAgainBtn" style="margin-top:0.5rem">Play Again</button>
+  </div>
+
+</div>
+
+<!-- ══════════════════════ HISTORY VIEW ══════════════════════ -->
+<div class="view" id="view-history">
+  <div class="setup-panel">
+    <h2>Your Progress</h2>
+    <div class="history-summary" id="historySummary"></div>
+  </div>
+  <div class="chart-wrap">
+    <canvas id="historyChart" height="140"></canvas>
+  </div>
+  <div class="setup-panel">
+    <h2>Recent Sessions</h2>
+    <div id="historyTableWrap"></div>
+  </div>
+  <button class="btn btn-danger" id="clearHistoryBtn">Clear History</button>
+</div>
+
 </main>
 
 <script>
 const SUIT_SYMBOLS = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
 const RED_SUITS = new Set(['hearts', 'diamonds']);
+
+function isRed(card) { return RED_SUITS.has(card.suit); }
+
+// ═══════════════════════════ Mode tabs ═══════════════════════════════════════
+
+const tabBtns = document.querySelectorAll('.tab-btn');
+const views = {
+  count:    document.getElementById('view-count'),
+  strategy: document.getElementById('view-strategy'),
+  history:  document.getElementById('view-history'),
+};
+
+tabBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    tabBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    Object.values(views).forEach(v => v.classList.remove('active'));
+    views[btn.dataset.mode].classList.add('active');
+    if (btn.dataset.mode === 'history') renderHistory();
+  });
+});
+
+// ═══════════════════════════ History / stats (localStorage) ═════════════════
+
+const HISTORY_KEY = 'cardCounterHistory';
+const HISTORY_MAX = 300;
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function logHistory(record) {
+  const history = loadHistory();
+  history.push({ ts: Date.now(), ...record });
+  while (history.length > HISTORY_MAX) history.shift();
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch (e) { /* storage unavailable — fail silently, not critical */ }
+}
+
+let historyChartInstance = null;
+
+function renderHistory() {
+  const history = loadHistory();
+  const summaryEl = document.getElementById('historySummary');
+  const tableWrap = document.getElementById('historyTableWrap');
+
+  if (history.length === 0) {
+    summaryEl.innerHTML = '';
+    tableWrap.innerHTML = '<p class="empty-note">No sessions yet — play a round to start tracking your progress.</p>';
+    if (historyChartInstance) { historyChartInstance.destroy(); historyChartInstance = null; }
+    return;
+  }
+
+  const countSessions    = history.filter(h => h.mode === 'count');
+  const strategySessions = history.filter(h => h.mode === 'strategy');
+
+  const countAccuracyPct = countSessions.length
+    ? Math.round(100 * countSessions.filter(h => h.correct).length / countSessions.length)
+    : null;
+
+  const stratTotals = strategySessions.reduce((acc, h) => {
+    acc.correct += h.correct_decisions; acc.total += h.total_decisions; return acc;
+  }, { correct: 0, total: 0 });
+  const stratAccuracyPct = stratTotals.total ? Math.round(100 * stratTotals.correct / stratTotals.total) : null;
+
+  // Current streak: consecutive most-recent count-trainer sessions answered correctly.
+  let streak = 0;
+  for (let i = countSessions.length - 1; i >= 0; i--) {
+    if (countSessions[i].correct) streak++; else break;
+  }
+
+  const stats = [
+    { val: history.length, lbl: 'Total sessions' },
+    { val: countAccuracyPct !== null ? countAccuracyPct + '%' : '—', lbl: 'Count accuracy' },
+    { val: stratAccuracyPct !== null ? stratAccuracyPct + '%' : '—', lbl: 'Strategy decision accuracy' },
+    { val: streak, lbl: 'Current count streak' },
+  ];
+
+  summaryEl.innerHTML = stats.map(s => `
+    <div class="history-stat">
+      <span class="val">${s.val}</span>
+      <span class="lbl">${s.lbl}</span>
+    </div>
+  `).join('');
+
+  // Chart: per-session accuracy % (count sessions are binary 0/100; strategy
+  // sessions use that session's own decision accuracy), most recent 25.
+  const recentForChart = history.slice(-25);
+  const labels = recentForChart.map((_, i) => `${i + 1}`);
+  const points = recentForChart.map(h =>
+    h.mode === 'count' ? (h.correct ? 100 : 0) : Math.round(100 * h.correct_decisions / h.total_decisions)
+  );
+  const colors = recentForChart.map(h => h.mode === 'count' ? '#f59e0b' : '#22c55e');
+
+  if (typeof Chart !== 'undefined') {
+    const ctx = document.getElementById('historyChart').getContext('2d');
+    if (historyChartInstance) historyChartInstance.destroy();
+    historyChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Session accuracy %',
+          data: points,
+          borderColor: '#f59e0b',
+          backgroundColor: 'rgba(245,158,11,0.15)',
+          pointBackgroundColor: colors,
+          tension: 0.25,
+          fill: true,
+        }],
+      },
+      options: {
+        scales: {
+          y: { min: 0, max: 100, ticks: { color: '#64748b' }, grid: { color: '#2d3f55' } },
+          x: { ticks: { color: '#64748b' }, grid: { color: '#2d3f55' } },
+        },
+        plugins: { legend: { labels: { color: '#e2e8f0' } } },
+      },
+    });
+  }
+
+  const recentForTable = history.slice(-20).reverse();
+  const rows = recentForTable.map(h => {
+    const date = new Date(h.ts).toLocaleString();
+    if (h.mode === 'count') {
+      return `<tr>
+        <td>${date}</td><td>Count</td>
+        <td>${h.correct ? '✅ Correct' : `❌ Off by ${h.delta}`}</td>
+        <td>${h.num_decks} decks · ${h.cards_shown}/${h.total_shoe_size} cards</td>
+      </tr>`;
+    }
+    const pct = Math.round(100 * h.correct_decisions / h.total_decisions);
+    return `<tr>
+      <td>${date}</td><td>Strategy</td>
+      <td>${pct}% correct (${h.correct_decisions}/${h.total_decisions})</td>
+      <td>${h.num_decks} decks · ${h.num_hands} hands · W${h.wins}/L${h.losses}/P${h.pushes}</td>
+    </tr>`;
+  }).join('');
+
+  tableWrap.innerHTML = `
+    <table class="history-table">
+      <thead><tr><th>When</th><th>Mode</th><th>Result</th><th>Detail</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+document.getElementById('clearHistoryBtn').addEventListener('click', () => {
+  if (!confirm('Clear all saved history? This cannot be undone.')) return;
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+});
+
+// ═══════════════════════════ COUNT TRAINER ═══════════════════════════════════
 
 let cards        = [];
 let currentIndex = 0;
@@ -504,7 +927,6 @@ let flipTimer    = null;
 let sessionId    = null;
 let hintsOn      = false;
 
-// ── Elements ─────────────────────────────────────────────────────────────────
 const setupPanel    = document.getElementById('setupPanel');
 const gameArea      = document.getElementById('gameArea');
 const answerPanel   = document.getElementById('answerPanel');
@@ -528,22 +950,46 @@ const hiloReference = document.getElementById('hiloReference');
 const numDecksEl    = document.getElementById('numDecks');
 const numCardsEl    = document.getElementById('numCards');
 const numCardsHint  = document.getElementById('numCardsHint');
+const numCardsGroup = document.getElementById('numCardsGroup');
+const penetrationEl = document.getElementById('penetration');
+const penetrationSummary = document.getElementById('penetrationSummary');
 
 // ── Setup helpers ─────────────────────────────────────────────────────────────
 
 function maxCards() { return parseInt(numDecksEl.value) * 52; }
 
-function updateNumCardsHint() {
+function computeCardsToDeal() {
+  const max = maxCards();
+  if (penetrationEl.value === 'custom') {
+    const raw = numCardsEl.value.trim();
+    return raw ? parseInt(raw) : max;
+  }
+  return Math.max(5, Math.round(max * parseFloat(penetrationEl.value)));
+}
+
+function updatePenetrationUI() {
   const max = maxCards();
   numCardsHint.textContent = `max ${max}`;
   numCardsEl.max = max;
   numCardsEl.placeholder = `Full shoe (${max} cards)`;
-  // Clamp existing value if it now exceeds new max
   if (numCardsEl.value && parseInt(numCardsEl.value) > max) numCardsEl.value = '';
+
+  const isCustom = penetrationEl.value === 'custom';
+  numCardsGroup.style.display = isCustom ? '' : 'none';
+
+  const toDeal = computeCardsToDeal();
+  const pct = Math.round((toDeal / max) * 100);
+  penetrationSummary.textContent = isCustom
+    ? `Custom — ${toDeal} of ${max} cards dealt.`
+    : (pct === 100
+        ? `Full shoe — ${toDeal} of ${max} cards dealt.`
+        : `${pct}% penetration — ${toDeal} of ${max} cards dealt, then stop.`);
 }
 
-numDecksEl.addEventListener('change', updateNumCardsHint);
-updateNumCardsHint(); // run once on load
+numDecksEl.addEventListener('change', updatePenetrationUI);
+penetrationEl.addEventListener('change', updatePenetrationUI);
+numCardsEl.addEventListener('input', updatePenetrationUI);
+updatePenetrationUI();
 
 // ── Hints toggle ──────────────────────────────────────────────────────────────
 
@@ -560,8 +1006,6 @@ hintToggle.addEventListener('click', () => {
 stopEarlyBtn.addEventListener('click', () => {
   if (flipTimer) { clearInterval(flipTimer); flipTimer = null; }
   stopEarlyBtn.disabled = true;
-
-  // currentIndex is 0-based; the card at currentIndex is the last one shown
   const shown = currentIndex + 1;
   showDone(shown, cards.length);
 });
@@ -573,21 +1017,18 @@ startBtn.addEventListener('click', async () => {
 
   const numDecks   = parseInt(numDecksEl.value);
   const intervalMs = parseInt(document.getElementById('intervalMs').value);
-  const rawCards   = numCardsEl.value.trim();
-  const numCards   = rawCards ? parseInt(rawCards) : null;
+  const numCards   = computeCardsToDeal();
+  const max        = maxCards();
 
-  // Client-side validation for num_cards
-  if (numCards !== null) {
-    if (isNaN(numCards) || numCards < 5 || numCards > maxCards()) {
-      alert(`Cards to Deal must be between 5 and ${maxCards()}.`);
-      startBtn.disabled = false;
-      startBtn.textContent = 'Start Game';
-      return;
-    }
+  if (isNaN(numCards) || numCards < 5 || numCards > max) {
+    alert(`Cards to Deal must be between 5 and ${max}.`);
+    startBtn.disabled = false;
+    startBtn.textContent = 'Start Game';
+    return;
   }
 
   const body = { num_decks: numDecks, interval_ms: intervalMs };
-  if (numCards !== null) body.num_cards = numCards;
+  if (numCards !== max) body.num_cards = numCards;
 
   const res = await fetch('/api/session', {
     method: 'POST',
@@ -608,7 +1049,6 @@ startBtn.addEventListener('click', async () => {
   sessionId    = data.session_id;
   currentIndex = 0;
 
-  // Reset hint state each game
   hintsOn = false;
   hintToggle.textContent = 'Show Hints';
   hintToggle.classList.remove('active');
@@ -640,8 +1080,7 @@ function startFlipping(intervalMs) {
 
 function showCard(index) {
   const card    = cards[index];
-  const isRed   = RED_SUITS.has(card.suit);
-  const colorClass = isRed ? 'card-red' : 'card-black';
+  const colorClass = isRed(card) ? 'card-red' : 'card-black';
   const suit    = SUIT_SYMBOLS[card.suit];
   const rank    = card.rank;
 
@@ -660,14 +1099,12 @@ function showCard(index) {
   playingCard.style.display = 'flex';
   doneMsg.style.display = 'none';
 
-  // Hi-Lo badge (visibility controlled by .show-hint class on badge element)
   const value = hiLoValue(rank);
   hiloBadge.className = 'hilo-badge visible' +
     (hintsOn ? ' show-hint' : '') +
     ' ' + (value > 0 ? 'hilo-plus' : value < 0 ? 'hilo-minus' : 'hilo-zero');
   hiloBadge.textContent = value > 0 ? '+1' : value < 0 ? '−1' : '0';
 
-  // Progress
   const pct = ((index + 1) / cards.length) * 100;
   progressBar.style.width = pct + '%';
   cardCounter.textContent = `Card ${index + 1} of ${cards.length}`;
@@ -695,7 +1132,7 @@ function showDone(cardsShown, totalCards) {
     : `All ${totalCards} cards shown. Enter your running count.`;
 
   answerPanel.classList.add('active');
-  answerPanel.dataset.cardsShown = cardsShown;  // stash for submit
+  answerPanel.dataset.cardsShown = cardsShown;
   userCountInput.focus();
 }
 
@@ -709,7 +1146,6 @@ async function submitAnswer() {
   if (isNaN(userCount)) { userCountInput.focus(); return; }
 
   submitBtn.disabled = true;
-
   const cardsShown = parseInt(answerPanel.dataset.cardsShown ?? cards.length);
 
   const res = await fetch('/api/verify', {
@@ -721,6 +1157,16 @@ async function submitAnswer() {
   const result = await res.json();
   answerPanel.classList.remove('active');
   showResult(result);
+
+  logHistory({
+    mode: 'count',
+    correct: result.correct,
+    delta: result.delta,
+    true_count: result.true_count,
+    num_decks: parseInt(numDecksEl.value),
+    cards_shown: result.cards_shown,
+    total_shoe_size: result.total_shoe_size,
+  });
 }
 
 function showResult(result) {
@@ -745,24 +1191,16 @@ function showResult(result) {
     `;
   }
 
-  // Stats breakdown
   const statsLines = [];
-
   statsLines.push(`
-    <div class="stat-row">
-      <span>Running count</span>
-      <strong>${fmtCount(result.correct_count)}</strong>
-    </div>
+    <div class="stat-row"><span>Running count</span><strong>${fmtCount(result.correct_count)}</strong></div>
   `);
 
   if (result.true_count !== null && result.true_count !== undefined) {
     const tc = result.true_count;
     const tcSign = tc >= 0 ? '+' : '';
     statsLines.push(`
-      <div class="stat-row">
-        <span>True count</span>
-        <strong>${tcSign}${tc.toFixed(2)}</strong>
-      </div>
+      <div class="stat-row"><span>True count</span><strong>${tcSign}${tc.toFixed(2)}</strong></div>
     `);
     statsLines.push(`
       <div class="true-count-note">
@@ -775,10 +1213,7 @@ function showResult(result) {
   if (result.cards_shown !== undefined && result.total_shoe_size !== undefined &&
       result.cards_shown < result.total_shoe_size) {
     statsLines.push(`
-      <div class="stat-row">
-        <span>Cards shown</span>
-        <strong>${result.cards_shown} / ${result.total_shoe_size}</strong>
-      </div>
+      <div class="stat-row"><span>Cards shown</span><strong>${result.cards_shown} / ${result.total_shoe_size}</strong></div>
     `);
   }
 
@@ -794,11 +1229,8 @@ function showResult(result) {
   resultPanel.classList.add('active');
 }
 
-function fmtCount(n) {
-  return (n >= 0 ? '+' : '') + n;
-}
+function fmtCount(n) { return (n >= 0 ? '+' : '') + n; }
 
-// ── Shared reset-to-menu helper ───────────────────────────────────────────────
 function resetToMenu() {
   cards        = [];
   currentIndex = 0;
@@ -815,7 +1247,6 @@ function resetToMenu() {
   startBtn.textContent = 'Start Game';
   delete answerPanel.dataset.cardsShown;
 
-  // Reset hints
   hintsOn = false;
   hintToggle.textContent = 'Show Hints';
   hintToggle.classList.remove('active');
@@ -825,11 +1256,212 @@ function resetToMenu() {
   setupPanel.style.display = '';
 }
 
-// ── Play again ────────────────────────────────────────────────────────────────
 playAgainBtn.addEventListener('click', resetToMenu);
-
-// ── Back to Menu (from answer panel) ─────────────────────────────────────────
 backToMenuBtn.addEventListener('click', resetToMenu);
+
+// ═══════════════════════════ BASIC STRATEGY TRAINER ══════════════════════════
+
+let stratSessionId = null;
+
+const stratSetupPanel   = document.getElementById('stratSetupPanel');
+const stratGameArea     = document.getElementById('stratGameArea');
+const stratSummaryPanel = document.getElementById('stratSummaryPanel');
+const stratStartBtn     = document.getElementById('stratStartBtn');
+const stratHandCounter  = document.getElementById('stratHandCounter');
+const stratAccuracyEl   = document.getElementById('stratAccuracy');
+const stratDealerCards  = document.getElementById('stratDealerCards');
+const stratPlayerCards  = document.getElementById('stratPlayerCards');
+const stratDealerTotal  = document.getElementById('stratDealerTotal');
+const stratPlayerTotal  = document.getElementById('stratPlayerTotal');
+const stratFeedback     = document.getElementById('stratFeedback');
+const stratOutcome      = document.getElementById('stratOutcome');
+const stratActions      = document.getElementById('stratActions');
+const stratNextBtn      = document.getElementById('stratNextBtn');
+const stratBackBtn      = document.getElementById('stratBackBtn');
+const stratPlayAgainBtn = document.getElementById('stratPlayAgainBtn');
+
+const ACTION_NAMES = { H: 'Hit', S: 'Stand', D: 'Double', P: 'Split' };
+
+function miniCardHTML(card, faceDown = false) {
+  if (faceDown) return `<div class="mini-card back"></div>`;
+  const colorClass = isRed(card) ? 'red' : 'black';
+  return `
+    <div class="mini-card ${colorClass}">
+      <div class="r">${card.rank}</div>
+      <div class="s">${SUIT_SYMBOLS[card.suit]}</div>
+    </div>
+  `;
+}
+
+function renderStratHand(hand) {
+  const holeHidden = hand.dealer_cards.length === 1;
+  stratDealerCards.innerHTML = hand.dealer_cards.map(c => miniCardHTML(c)).join('')
+    + (holeHidden ? miniCardHTML(null, true) : '');
+  stratDealerTotal.textContent = holeHidden ? `showing ${hand.dealer_upcard.rank}` : `${hand.dealer_total}`;
+
+  stratPlayerCards.innerHTML = hand.player_cards.map(c => miniCardHTML(c)).join('');
+  stratPlayerTotal.textContent = hand.player_soft ? `${hand.player_total} (soft)` : `${hand.player_total}`;
+
+  document.getElementById('actHit').disabled    = false;
+  document.getElementById('actStand').disabled  = false;
+  document.getElementById('actDouble').disabled = !hand.can_double;
+  document.getElementById('actSplit').disabled  = !hand.can_split;
+
+  stratActions.style.display = 'flex';
+  stratNextBtn.style.display = 'none';
+  stratFeedback.style.display = 'none';
+  stratOutcome.style.display = 'none';
+}
+
+function updateStratProgress(session) {
+  stratHandCounter.textContent = `Hand ${Math.min(session.hands_played + 1, session.num_hands)} of ${session.num_hands}`;
+  stratAccuracyEl.textContent = session.total_decisions
+    ? `Accuracy: ${Math.round(100 * session.correct_decisions / session.total_decisions)}% (${session.correct_decisions}/${session.total_decisions})`
+    : 'Accuracy: —';
+}
+
+stratStartBtn.addEventListener('click', async () => {
+  stratStartBtn.disabled = true;
+  stratStartBtn.textContent = 'Dealing…';
+
+  const num_decks   = parseInt(document.getElementById('stratNumDecks').value);
+  const num_hands   = parseInt(document.getElementById('stratNumHands').value);
+  const penetration = parseFloat(document.getElementById('stratPenetration').value);
+
+  const res = await fetch('/api/strategy/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ num_decks, num_hands, penetration }),
+  });
+
+  stratStartBtn.disabled = false;
+  stratStartBtn.textContent = 'Start Hands';
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.error || 'Failed to start session. Please try again.');
+    return;
+  }
+
+  const session = await res.json();
+  stratSessionId = session.session_id;
+
+  stratSetupPanel.style.display = 'none';
+  stratSummaryPanel.classList.remove('active');
+  stratGameArea.classList.add('active');
+
+  updateStratProgress(session);
+  renderStratHand(session.hand);
+});
+
+async function sendStratAction(action) {
+  ['actHit', 'actStand', 'actDouble', 'actSplit'].forEach(id => document.getElementById(id).disabled = true);
+
+  const res = await fetch('/api/strategy/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: stratSessionId, action }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.error || 'Something went wrong.');
+    return;
+  }
+
+  const { result, session } = await res.json();
+
+  stratFeedback.style.display = 'block';
+  stratFeedback.className = 'strat-feedback ' + (result.was_correct ? 'correct' : 'wrong');
+  stratFeedback.textContent = result.was_correct
+    ? `✓ Correct — ${ACTION_NAMES[result.action_taken]} was right.`
+    : `✗ Not quite — basic strategy says ${ACTION_NAMES[result.correct_action]}, you chose ${ACTION_NAMES[result.action_taken]}.`;
+
+  updateStratProgress(session);
+
+  if (!result.hand_finished) {
+    // Hand continues (a Hit that didn't bust) — re-render from the live hand.
+    renderStratHand(session.hand);
+    document.getElementById('actDouble').disabled = true; // never legal after the first move
+    document.getElementById('actSplit').disabled  = true;
+    return;
+  }
+
+  // Hand is over — reveal the dealer's full hand and the outcome.
+  stratDealerCards.innerHTML = result.dealer_cards.map(c => miniCardHTML(c)).join('');
+  stratDealerTotal.textContent = result.dealer_total ?? '';
+  stratPlayerCards.innerHTML = result.player_cards.map(c => miniCardHTML(c)).join('');
+  stratPlayerTotal.textContent = result.player_total ?? '';
+
+  stratActions.style.display = 'none';
+
+  const outcomeText = {
+    win:  '🎉 You won this hand.',
+    loss: '❌ You lost this hand.',
+    push: '🤝 Push — a tie with the dealer.',
+    split: '✂️ Split scored for strategy only — not replayed as two hands.',
+  }[result.outcome] || '';
+  stratOutcome.style.display = 'block';
+  stratOutcome.innerHTML = outcomeText;
+
+  if (session.done) {
+    showStratSummary(session);
+  } else {
+    window.__stratPendingHand = session.hand;
+    stratNextBtn.style.display = 'block';
+  }
+}
+
+document.getElementById('actHit').addEventListener('click', () => sendStratAction('H'));
+document.getElementById('actStand').addEventListener('click', () => sendStratAction('S'));
+document.getElementById('actDouble').addEventListener('click', () => sendStratAction('D'));
+document.getElementById('actSplit').addEventListener('click', () => sendStratAction('P'));
+
+stratNextBtn.addEventListener('click', async () => {
+  // The next hand was already dealt server-side; just re-fetch current view
+  // by re-rendering from the session snapshot we already have. We stashed it
+  // on the button via dataset in showResultForNextHand — simplest: refetch
+  // isn't needed since apply_action's `session.hand` already holds it.
+  renderStratHand(window.__stratPendingHand);
+  stratActions.style.display = 'flex';
+});
+
+function showStratSummary(session) {
+  stratGameArea.classList.remove('active');
+  stratSummaryPanel.classList.add('active');
+
+  const pct = session.total_decisions ? Math.round(100 * session.correct_decisions / session.total_decisions) : 0;
+  document.getElementById('stratSummaryTitle').textContent = `${pct}% Strategy Accuracy`;
+
+  document.getElementById('stratSummaryStats').innerHTML = `
+    <div class="stat-row"><span>Decisions correct</span><strong>${session.correct_decisions} / ${session.total_decisions}</strong></div>
+    <div class="stat-row"><span>Hands played</span><strong>${session.hands_played}</strong></div>
+    <div class="stat-row"><span>Wins</span><strong>${session.wins}</strong></div>
+    <div class="stat-row"><span>Losses</span><strong>${session.losses}</strong></div>
+    <div class="stat-row"><span>Pushes</span><strong>${session.pushes}</strong></div>
+  `;
+
+  logHistory({
+    mode: 'strategy',
+    correct_decisions: session.correct_decisions,
+    total_decisions: session.total_decisions,
+    num_decks: session.num_decks,
+    num_hands: session.num_hands,
+    wins: session.wins,
+    losses: session.losses,
+    pushes: session.pushes,
+  });
+}
+
+function resetStratToMenu() {
+  stratSessionId = null;
+  stratGameArea.classList.remove('active');
+  stratSummaryPanel.classList.remove('active');
+  stratSetupPanel.style.display = '';
+}
+
+stratBackBtn.addEventListener('click', resetStratToMenu);
+stratPlayAgainBtn.addEventListener('click', resetStratToMenu);
 </script>
 </body>
 </html>
