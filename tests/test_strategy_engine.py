@@ -20,6 +20,7 @@ from strategy_engine import (
     check_count,
     build_summary,
     stop_session,
+    start_next_round,
     public_hand_view,
     public_round_view,
     public_session_view,
@@ -27,6 +28,7 @@ from strategy_engine import (
     MIN_HANDS,
     MAX_HANDS,
     MAX_ROUNDS,
+    MAX_SPLITS_PER_SPOT,
 )
 from basic_strategy import HIT, STAND, DOUBLE, SPLIT
 
@@ -42,6 +44,7 @@ def _shoe(draw_order):
 
 def _fresh_state(spot_hands_ranks, dealer_ranks, draw_order=None,
                   dealer_hits_soft17=False, double_after_split=True, live_mode=False,
+                  stand_on_split_aces=False, splits_used=0,
                   running_count=0, active_spot_index=0, active_hand_index=0):
     """
     spot_hands_ranks: one entry per spot; each entry is a list of hands
@@ -62,7 +65,7 @@ def _fresh_state(spot_hands_ranks, dealer_ranks, draw_order=None,
                 'hint_used':     False,
                 'outcome':       None,
             })
-        spots.append({'hands': hands, 'natural': False, 'resolved': False})
+        spots.append({'hands': hands, 'natural': False, 'resolved': False, 'splits_used': splits_used})
 
     round_ = {
         'spots':              spots,
@@ -76,7 +79,7 @@ def _fresh_state(spot_hands_ranks, dealer_ranks, draw_order=None,
     return {
         'num_decks': 1, 'num_hands': len(spots), 'penetration': 0.75,
         'dealer_hits_soft17': dealer_hits_soft17, 'double_after_split': double_after_split,
-        'live_mode': live_mode,
+        'live_mode': live_mode, 'stand_on_split_aces': stand_on_split_aces,
         'shoe': _shoe(draw_order or []), 'shoe_size': 52, 'cutoff': 15,
         'shuffles': 0, 'mid_hand_reshuffles': 0,
         'rounds_played': 0, 'hands_played': 0,
@@ -88,12 +91,13 @@ def _fresh_state(spot_hands_ranks, dealer_ranks, draw_order=None,
     }
 
 
-def _bare_state(num_hands, draws_in_order, dealer_hits_soft17=False, double_after_split=True, live_mode=False):
+def _bare_state(num_hands, draws_in_order, dealer_hits_soft17=False, double_after_split=True,
+                 live_mode=False, stand_on_split_aces=False):
     """Minimal state for exercising _deal_new_round directly (round-dealing tests)."""
     return {
         'num_decks': 1, 'num_hands': num_hands, 'penetration': 0.75,
         'dealer_hits_soft17': dealer_hits_soft17, 'double_after_split': double_after_split,
-        'live_mode': live_mode,
+        'live_mode': live_mode, 'stand_on_split_aces': stand_on_split_aces,
         'shoe': _shoe(draws_in_order), 'shoe_size': 52, 'cutoff': 0,
         'shuffles': 0, 'mid_hand_reshuffles': 0,
         'rounds_played': 0, 'hands_played': 0,
@@ -157,7 +161,6 @@ class TestDealNewRoundDealerBlackjack:
     def test_dealer_blackjack_ends_round_with_no_decisions(self):
         # spot1c1=A, spot2c1=5, dealerUp=A, spot1c2=K, spot2c2=6, dealerHole=K
         state = _bare_state(num_hands=2, draws_in_order=['A', '5', 'A', 'K', '6', 'K'])
-        state['rounds_played'] = MAX_ROUNDS - 1  # don't let the auto-dealt next round pollute counters
         _deal_new_round(state)
         assert state['pushes'] == 1   # spot1 = A,K = 21 pushes dealer blackjack
         assert state['losses'] == 1   # spot2 = 5,6 = 11 loses outright
@@ -196,6 +199,68 @@ class TestDealNewRoundNaturalsAndPeek:
         assert state['current_round']['dealer_blackjack'] is None
 
 
+class TestRoundAdvanceIsPlayerDriven:
+    """PR #1 feedback: a finished round must stay fully visible (dealer's
+    whole hand, every spot's outcome) until the player explicitly asks for
+    the next one — it must not be silently replaced."""
+
+    def test_round_stays_round_over_after_last_hand_resolves(self):
+        state = _fresh_state([[['10', 'K']]], ['6', '5'], draw_order=['4', '3'])
+        result = apply_action(state, STAND)
+        assert result['round_finished'] is True
+        round_ = state['current_round']
+        assert round_ is not None
+        assert round_['stage'] == 'round_over'
+        assert round_['dealer_hole_hidden'] is False
+        assert round_['spots'][0]['hands'][0]['outcome'] == 'win'
+
+    def test_dealer_blackjack_round_also_stays_visible(self):
+        state = _bare_state(num_hands=2, draws_in_order=['A', '5', 'A', 'K', '6', 'K'])
+        _deal_new_round(state)
+        round_ = state['current_round']
+        assert round_ is not None
+        assert round_['stage'] == 'round_over'
+        assert round_['spots'][0]['hands'][0]['outcome'] == 'push'
+        assert round_['spots'][1]['hands'][0]['outcome'] == 'loss'
+
+    def test_start_next_round_raises_mid_round(self):
+        state = _fresh_state([[['5', '3']]], ['6', '9'])  # still player_turn
+        with pytest.raises(ValueError):
+            start_next_round(state)
+
+    def test_start_next_round_deals_a_fresh_round(self):
+        state = _fresh_state([[['10', 'K']]], ['6', '5'], draw_order=['4', '3'])
+        apply_action(state, STAND)
+        rounds_before = state['rounds_played']
+        start_next_round(state)
+        # rounds_played only bumps in _finalize_round — either the new round is
+        # still awaiting a decision (unchanged), or it instantly resolved too
+        # (dealer blackjack / all-naturals on the freshly reshuffled shoe).
+        assert state['rounds_played'] in (rounds_before, rounds_before + 1)
+        round_ = state['current_round']
+        assert round_ is not None
+        assert round_['stage'] in ('player_decisions', 'round_over')
+        assert len(round_['spots'][0]['hands'][0]['player_cards']) == 2
+
+    def test_start_next_round_ends_session_at_round_cap(self):
+        state = _fresh_state([[['10', 'K']]], ['6', '5'], draw_order=['4', '3'])
+        apply_action(state, STAND)
+        state['rounds_played'] = MAX_ROUNDS
+        start_next_round(state)
+        assert state['done'] is True
+        assert state['current_round'] is None
+
+    def test_apply_action_never_auto_deals_next_round(self):
+        # Regression guard: before this fix, apply_action would silently
+        # deal a brand-new round the instant the current one finished.
+        state = _fresh_state([[['10', 'K']]], ['6', '5'], draw_order=['4', '3'])
+        apply_action(state, STAND)
+        # If a new round had been auto-dealt, the dealer's cards here would
+        # be a fresh random hand, not our controlled 6,5,4,3 -> 18.
+        dealer_ranks = [c['rank'] for c in state['current_round']['dealer_cards']]
+        assert dealer_ranks == ['6', '5', '4', '3']
+
+
 class TestApplyActionHit:
     def test_correct_hit_scored_correct(self):
         state = _fresh_state([[['5', '3']]], ['6', '9'], draw_order=['2'])
@@ -226,7 +291,6 @@ class TestApplyActionHit:
 
     def test_hit_that_busts_ends_hand_as_loss_and_advances(self):
         state = _fresh_state([[['10', '9']]], ['6', '9'], draw_order=['10'])
-        state['rounds_played'] = MAX_ROUNDS - 1
         result = apply_action(state, HIT)
         assert result['hand_finished'] is True
         assert result['outcome'] == 'loss'
@@ -237,7 +301,6 @@ class TestApplyActionHit:
 class TestApplyActionStand:
     def test_stand_reveals_dealer_and_resolves(self):
         state = _fresh_state([[['10', 'K']]], ['6', '5'], draw_order=['4', '3'])
-        state['rounds_played'] = MAX_ROUNDS - 1
         result = apply_action(state, STAND)
         assert result['hand_finished'] is True
         assert result['outcome'] == 'win'
@@ -256,14 +319,12 @@ class TestApplyActionStand:
 
     def test_push_when_totals_match(self):
         state = _fresh_state([[['10', '9']]], ['10', '9'])
-        state['rounds_played'] = MAX_ROUNDS - 1
         result = apply_action(state, STAND)
         assert result['outcome'] == 'push'
         assert state['pushes'] == 1
 
     def test_dealer_plays_once_and_settles_all_live_spots(self):
         state = _fresh_state([[['10', '9']], [['9', '8']]], ['6', '5'], draw_order=['4', '3'])
-        state['rounds_played'] = MAX_ROUNDS - 1
         apply_action(state, STAND)  # spot 0 stands
         result = apply_action(state, STAND)  # spot 1 stands -> dealer plays once
         dealer_cards = result.get('dealer_cards') or state['current_round']
@@ -282,7 +343,6 @@ class TestApplyActionDouble:
 
     def test_double_that_busts_is_an_immediate_loss(self):
         state = _fresh_state([[['10', '6']]], ['6', '4'], draw_order=['10'])
-        state['rounds_played'] = MAX_ROUNDS - 1
         result = apply_action(state, DOUBLE)
         assert result['outcome'] == 'loss'
         assert state['losses'] == 1
@@ -305,7 +365,7 @@ class TestPlayableSplits:
         assert len(spot['hands']) == 2
         assert spot['hands'][0]['player_cards'][1]['rank'] == '2'
         assert spot['hands'][1]['player_cards'][1]['rank'] == '3'
-        assert spot['hands'][0]['can_split'] is False  # no re-splitting
+        assert spot['hands'][0]['can_split'] is False  # 8,2 isn't a pair — not re-split-eligible
         assert result['outcome'] == 'split'
         assert state['current_round']['active_hand_index'] == 0
 
@@ -353,6 +413,84 @@ class TestPlayableSplits:
             apply_action(state, DOUBLE)
 
 
+class TestReSplitting:
+    def test_re_splitting_a_second_pair_makes_three_hands(self):
+        # Split 8,8 -> hand0=8,8 (still a pair!), hand1=8,2. Re-split hand0.
+        state = _fresh_state([[['8', '8']]], ['6', '9'], draw_order=['8', '2', '4', '5'])
+        apply_action(state, SPLIT)  # hand0 = 8,8 ; hand1 = 8,2
+        spot = state['current_round']['spots'][0]
+        assert len(spot['hands']) == 2
+        assert spot['hands'][0]['can_split'] is True  # 8,8 is a pair again
+        assert spot['splits_used'] == 1
+
+        result = apply_action(state, SPLIT)  # re-split hand0 -> hand0=8,4 ; hand1=8,5 ; (old hand1=8,2 stays)
+        assert result['outcome'] == 'split'
+        assert len(spot['hands']) == 3
+        assert spot['splits_used'] == 2
+        assert [h['player_cards'][-1]['rank'] for h in spot['hands']] == ['4', '5', '2']
+
+    def test_third_split_is_illegal_even_if_pair_again(self):
+        # Force a third pair to reappear so only the split cap (not pair-ness) blocks it.
+        state = _fresh_state([[['8', '8']]], ['6', '9'], draw_order=['8', '2', '8', '5'], splits_used=1)
+        # Pre-seed as if one split already happened: hand0 = 8,8 (re-split-eligible), hand1 = untouched pair.
+        spot = state['current_round']['spots'][0]
+        spot['hands'] = [
+            {'player_cards': [{'rank': '8', 'suit': 'spades'}, {'rank': '8', 'suit': 'spades'}],
+             'stage': 'player_turn', 'can_double': True, 'can_split': True,
+             'is_split_hand': True, 'hint_used': False, 'outcome': None},
+        ]
+        state['current_round']['active_hand_index'] = 0
+        result = apply_action(state, SPLIT)  # splits_used 1 -> 2, at the cap now
+        assert result['outcome'] == 'split'
+        assert spot['splits_used'] == MAX_SPLITS_PER_SPOT
+        for hand in spot['hands']:
+            assert hand['can_split'] is False  # cap reached, even though these are 8,8/8,8 pairs
+        with pytest.raises(ValueError):
+            apply_action(state, SPLIT)
+
+    def test_re_split_hand_still_scores_independently(self):
+        state = _fresh_state([[['8', '8']]], ['6', '9'], draw_order=['8', '2', '4', '5'])
+        apply_action(state, SPLIT)
+        apply_action(state, SPLIT)  # now 3 hands, active on the first new sub-hand (8,4 = 12)
+        result = apply_action(state, HIT)
+        assert state['total_decisions'] == 3  # original split + re-split + this hit
+        assert result is not None
+
+
+class TestStandOnSplitAces:
+    def test_force_stand_true_ends_both_ace_hands_immediately(self):
+        # A second spot still needs a decision, so we can observe the forced
+        # 'awaiting_dealer' state before the (single, once-per-round) dealer
+        # play would otherwise immediately resolve it.
+        state = _fresh_state([[['A', 'A']], [['5', '6']]], ['6', '9'],
+                              draw_order=['5', '4'], stand_on_split_aces=True)
+        result = apply_action(state, SPLIT)
+        spot = state['current_round']['spots'][0]
+        assert spot['hands'][0]['stage'] == 'awaiting_dealer'
+        assert spot['hands'][1]['stage'] == 'awaiting_dealer'
+        assert spot['hands'][0]['can_double'] is False
+        assert spot['hands'][0]['can_split'] is False
+        assert result['hand_finished'] is True
+        assert state['current_round']['active_spot_index'] == 1  # moved on to the other spot
+
+    def test_force_stand_false_leaves_ace_hands_playable(self):
+        state = _fresh_state([[['A', 'A']]], ['6', '9'], draw_order=['5', '4'], stand_on_split_aces=False)
+        apply_action(state, SPLIT)
+        spot = state['current_round']['spots'][0]
+        assert spot['hands'][0]['stage'] == 'player_turn'
+        assert spot['hands'][1]['stage'] == 'player_turn'
+
+    def test_force_stand_only_applies_to_aces_not_other_pairs(self):
+        state = _fresh_state([[['8', '8']]], ['6', '9'], draw_order=['2', '3'], stand_on_split_aces=True)
+        apply_action(state, SPLIT)
+        spot = state['current_round']['spots'][0]
+        assert spot['hands'][0]['stage'] == 'player_turn'
+
+    def test_config_validation_rejects_non_bool(self):
+        with pytest.raises(ValueError):
+            create_session(num_decks=1, num_hands=1, stand_on_split_aces='yes')
+
+
 class TestHint:
     def test_hint_does_not_mutate_state(self):
         state = _fresh_state([[['5', '3']]], ['6', '9'])
@@ -393,7 +531,6 @@ class TestLiveModeCountAndDeviations:
         state = _bare_state(num_hands=1, draws_in_order=['5', '9', '6', 'K'], live_mode=True)
         _deal_new_round(state)
         assert state['running_count'] == 2
-        state['rounds_played'] = MAX_ROUNDS - 1  # stop the session from auto-dealing a next round
         apply_action(state, STAND)  # dealer 9,K=19 already >=17, no further draws
         assert state['running_count'] == 1  # hole K now counted (-1)
 
@@ -450,7 +587,6 @@ class TestSummary:
 
     def test_summary_math_matches_fixture_state(self):
         state = _fresh_state([[['10', 'K']]], ['6', '5'], draw_order=['4', '3'])
-        state['rounds_played'] = MAX_ROUNDS - 1
         apply_action(state, STAND)  # correct, wins
         summary = stop_session(state)
         assert summary['wins'] == 1

@@ -273,7 +273,9 @@ A,A:   Y Y Y Y Y Y Y Y Y Y
       spot becomes two independently playable hands (each can hit/stand/double
       — no re-splitting; this is a deliberate simplification, same spirit as
       the current codebase's existing simplifications, and should be commented
-      as such)
+      as such) — **superseded by Task 10**: PR #1 review asked for
+      re-splitting to be lifted, so this is no longer the shipped behavior;
+      kept here for history, see Task 10 for what actually ships
 - [x] Each split hand is scored against basic strategy independently as the
       player acts on it
 - [x] Dealer's single per-round hand resolves against both split hands
@@ -388,6 +390,51 @@ deviations is out of scope for this pass (see Stretch Features).
       12 Task 1 and this task's source block, not against memory or
       assumption
 
+### Task 10 — PR #1 review feedback
+Follow-up work driven by review comments on the first PR, confirmed with the
+user before implementing the architecturally-significant items (round
+advancement, re-splitting).
+
+- [x] Rename the app from "Card Counter Trainer" to "Blackjack Trainer"
+      (`<title>` and header)
+- [x] Live mode: when an Illustrious 18 deviation applies and disagrees with
+      base strategy, the count-correct play drives the single per-decision
+      correct/wrong indicator in the UI (frontend-only — `correct_decisions`/
+      `total_decisions` and `deviation_correct`/`deviation_total` stay two
+      independent backend counters exactly as Task 6 designed; only which
+      verdict colors the on-screen feedback changed)
+- [x] **Round advancement is now player-driven, not automatic.** Previously a
+      round auto-dealt the next one the instant it finished, which meant the
+      dealer's revealed hand and each spot's win/loss/push outcome were
+      immediately overwritten before the player could see them — breaking
+      both trust in the UI and a live-mode player's manual count. Now
+      `_finalize_round()` marks the round `'round_over'` and stops; the round
+      (full dealer hand, every spot's outcome) stays on screen until the
+      player explicitly calls the new `POST /api/strategy/next-round`
+      (`start_next_round()` in the engine). `apply_action()` never deals a
+      new round itself anymore.
+- [x] Multi-hand table view now shows a ✅/❌/🤝 indicator per spot/hand so
+      each hand's result is visually distinct, not just implied by the
+      round transition
+- [x] **Re-splitting is now allowed**, up to `MAX_SPLITS_PER_SPOT = 2` splits
+      per spot (so up to 3 hands) — this replaces Task 4's original
+      no-re-split simplification. Gated by `spot['splits_used']`, not just
+      "is this hand a pair," so a spot that's hit its cap can't split again
+      even if a later hand happens to re-pair
+- [x] New table-config option `stand_on_split_aces: bool` — when a split's
+      original pair is Aces and this is True, both resulting hands are dealt
+      one card and forced straight to `awaiting_dealer` (real-table
+      convention, no further action offered); when False, split aces play
+      like any other split hand. Exposed as a config toggle so the user
+      decides, not hardcoded either way
+- [x] `pytest` — round stays `'round_over'` (not silently replaced) after the
+      last hand resolves, including the dealer-blackjack-instant-resolve
+      path; `start_next_round()` raises mid-round, deals a fresh round when
+      called on a resolved one, and ends the session at the round cap;
+      re-splitting produces 3 hands and blocks a would-be 3rd split even when
+      the cards would otherwise re-pair; `stand_on_split_aces` forces both
+      halves to stand only when the split pair was Aces and the flag is on
+
 ## 13. Definition of done
 
 - [x] All tasks above checked off
@@ -408,7 +455,9 @@ deviations is out of scope for this pass (see Stretch Features).
 - Late surrender option (both basic strategy and its own deviation indices)
 - Insurance as an explicit playable decision (currently only referenced by
   the deviation table, not offered as a real action)
-- Re-splitting (currently capped at one split per spot)
+- Re-splitting past `MAX_SPLITS_PER_SPOT` (currently capped at 2 splits / 3
+  hands per spot — Task 10 lifted the original "no re-splitting at all"
+  simplification, but an unlimited/higher cap is still a stretch feature)
 - Bankroll/betting simulation layered on top of Live mode bet-sizing by count
 
 ## 15. Independence checks
@@ -459,11 +508,13 @@ blending them into a meaningless average.
 hole card; a dealer blackjack ends the round immediately with no decisions
 offered (push any player 21, lose everything else) → otherwise, any spot
 holding a two-card 21 auto-resolves as an immediate win, no decision offered
-→ remaining spots play in order, hand-by-hand within a split spot (no
-re-splitting) → once every hand is either busted-and-settled or
-awaiting the dealer, the dealer plays its *single* hand once and that one
-result settles every hand still live → next round deals automatically
-unless the session was stopped or hit the round cap.
+→ remaining spots play in order, hand-by-hand within a split spot (up to
+`MAX_SPLITS_PER_SPOT` re-splits per spot as of Task 10) → once every hand is
+either busted-and-settled or awaiting the dealer, the dealer plays its
+*single* hand once and that one result settles every hand still live → the
+round is marked `'round_over'` and **stays on screen** — as of Task 10 the
+next round is no longer dealt automatically; the player must explicitly
+advance via "Next Hand," unless the session was stopped or hit the round cap.
 
 **Why `_resolve_das_pair_cell` is separate from `_downgrade`.** They answer
 different questions at different times. `_resolve_das_pair_cell` runs at
@@ -477,3 +528,19 @@ off," silently corrupting the chart lookup for a reason that has nothing to
 do with the table's rules at all. Keeping them separate — and separately
 named — makes it possible to reason about (and fact-check) each in
 isolation, which is exactly what the Task 1 fact-check script does.
+
+**Why round advancement became player-driven (Task 10).** The original
+design auto-dealt the next round the instant the current one resolved, on
+the theory that "open-ended play" meant the table should just keep moving.
+In practice this actively worked against the product: the dealer's revealed
+hand and each spot's win/loss/push outcome were computed correctly on the
+backend but overwritten in the same API response before the frontend ever
+rendered them, so the player never actually saw what the dealer drew or
+which of their hands won. That's not a cosmetic bug — in Live mode it breaks
+the entire premise of manual counting, since a player who can't see the
+cards that were dealt can't keep their own count in sync with the server's.
+The fix separates "the round is resolved" (`_finalize_round`, still
+automatic) from "deal the next one" (`start_next_round`, now an explicit
+player action) — the same distinction Task 1 draws between chart-lookup-time
+and decision-time concerns, applied to the round lifecycle instead of a
+single hand.

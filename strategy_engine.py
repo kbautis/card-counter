@@ -2,11 +2,13 @@
 strategy_engine.py — Multi-spot, live-table session engine for the Basic
 Strategy trainer.
 
-Architecture note (system-architect, Tasks 2-7):
+Architecture note (system-architect, Tasks 2-7; revised for PR #1 feedback):
   - A session now plays open-ended ROUNDS (not a fixed hand count). Each
     round deals `num_hands` independent SPOTS plus one dealer hand. A spot
     starts as one HAND, and becomes two independently playable hands if the
-    player splits (Task 4) — no re-splitting, a deliberate simplification.
+    player splits (Task 4), and MAY be split again up to `MAX_SPLITS_PER_SPOT`
+    times total (so up to 3 hands per spot) — re-splitting is now allowed,
+    gated per-spot by `spot['splits_used']`, not just "is this a pair".
   - Turn order is a single "cursor": `current_round['active_spot_index'] /
     active_hand_index` always points at the one hand currently awaiting a
     decision, advancing spot-by-spot, hand-by-hand within a split spot, then
@@ -17,6 +19,14 @@ Architecture note (system-architect, Tasks 2-7):
     strictly in that order (peek/dealer-blackjack first, since it can end
     the round with zero decisions offered; naturals second, since they only
     matter once we know the dealer doesn't already have blackjack).
+  - Round advancement is PLAYER-DRIVEN, not automatic: once every hand is
+    settled, `_finalize_round` marks the round `'round_over'` and stops —
+    it does NOT deal the next round. `state['current_round']` keeps the
+    fully-resolved round (full dealer hand, every spot/hand's outcome)
+    visible until the player explicitly calls `start_next_round`. This is
+    the fix for PR #1 feedback: players need to see the dealer play out and
+    each spot's individual result before the table moves on, both for
+    trust in the UI and so a live-mode player's manual count stays in sync.
   - Hi-Lo running count is accumulated here (Task 6) by reusing
     card_engine.hi_lo_value/calculate_true_count — never reimplemented. The
     dealer's hole card is drawn but NOT counted until it's actually revealed
@@ -27,6 +37,11 @@ Architecture note (system-architect, Tasks 2-7):
     independent judgments ("basic-strategy-correct?" and, only if an
     Illustrious 18 entry applies here, "count-correct?"), not one blended
     score.
+  - `stand_on_split_aces` is a table-config flag (like `double_after_split`):
+    when a split's original pair is Aces and this is True, both resulting
+    hands are forced straight to `awaiting_dealer` after their one card
+    (real-table convention) — no hit/stand/double/re-split offered on them.
+    When False, split aces play like any other split hand.
 
 Each function has a single responsibility. All preconditions fail fast.
 """
@@ -39,11 +54,13 @@ MAX_HANDS = 6  # simultaneous spots per round — realistic cap for a full live 
 DEFAULT_PENETRATION = 0.75
 MIN_RESHUFFLE_CUSHION = 15  # never deal a new round with fewer cards left than this
 MAX_ROUNDS = 500  # generous safety cap so an unattended/forgotten session can't grow forever
+MAX_SPLITS_PER_SPOT = 2  # at most two splits per spot -> at most 3 hands
 
 
 def _validate_new_session_args(
     num_decks: int, num_hands: int, penetration: float,
     dealer_hits_soft17: bool, double_after_split: bool, live_mode: bool,
+    stand_on_split_aces: bool,
 ) -> None:
     if not isinstance(num_decks, int) or not (1 <= num_decks <= 8):
         raise ValueError(f"num_decks must be an integer between 1 and 8, got {num_decks!r}")
@@ -59,6 +76,8 @@ def _validate_new_session_args(
         raise ValueError(f"double_after_split must be a bool, got {double_after_split!r}")
     if not isinstance(live_mode, bool):
         raise ValueError(f"live_mode must be a bool, got {live_mode!r}")
+    if not isinstance(stand_on_split_aces, bool):
+        raise ValueError(f"stand_on_split_aces must be a bool, got {stand_on_split_aces!r}")
 
 
 def _draw_card(state: dict) -> dict:
@@ -100,6 +119,17 @@ def _reveal_dealer_hole(state: dict, round_: dict) -> None:
         _count_card(state, round_['dealer_cards'][1])
 
 
+def _finalize_round(state: dict, round_: dict) -> None:
+    """
+    Mark a fully-resolved round 'round_over'. Deliberately does NOT deal the
+    next round — that's the explicit, player-driven start_next_round() so
+    the dealer's full hand and every spot's outcome stay visible until the
+    player is ready to continue (see module docstring).
+    """
+    round_['stage'] = 'round_over'
+    state['rounds_played'] += 1
+
+
 def _run_dealer_turn(state: dict, round_: dict) -> None:
     """Play the dealer's single hand once, then resolve every hand still awaiting it."""
     _reveal_dealer_hole(state, round_)
@@ -134,7 +164,7 @@ def _run_dealer_turn(state: dict, round_: dict) -> None:
     for spot in round_['spots']:
         spot['resolved'] = all(h['stage'] == 'done' for h in spot['hands'])
 
-    round_['stage'] = 'done'
+    _finalize_round(state, round_)
 
 
 def _advance_active_hand(state: dict, round_: dict) -> None:
@@ -177,6 +207,7 @@ def _deal_new_round(state: dict) -> None:
                                  is_split_hand=False)],
             'natural': False,
             'resolved': False,
+            'splits_used': 0,
         }
         for cards in spot_cards
     ]
@@ -210,8 +241,7 @@ def _deal_new_round(state: dict) -> None:
             hand['stage'] = 'done'
             state['hands_played'] += 1
             spot['resolved'] = True
-        round_['stage'] = 'done'
-        _finish_round(state)
+        _finalize_round(state, round_)
         return
 
     for spot in spots:
@@ -226,12 +256,19 @@ def _deal_new_round(state: dict) -> None:
             spot['resolved'] = True
 
     _advance_active_hand(state, round_)
-    if round_['stage'] == 'done':
-        _finish_round(state)
 
 
-def _finish_round(state: dict) -> None:
-    state['rounds_played'] += 1
+def start_next_round(state: dict) -> None:
+    """
+    Explicitly deal the next round once the current one is fully resolved.
+
+    Round advancement is player-driven (see module docstring) — this is the
+    only place a new round gets dealt after the first one, called from the
+    "Next Hand" action once the player has seen the finished round.
+    """
+    round_ = state['current_round']
+    if round_ is None or round_['stage'] != 'round_over':
+        raise ValueError("Current round is not finished yet")
     if state['rounds_played'] >= MAX_ROUNDS:
         state['done'] = True
         state['current_round'] = None
@@ -246,6 +283,7 @@ def create_session(
     dealer_hits_soft17: bool = False,
     double_after_split: bool = True,
     live_mode: bool = False,
+    stand_on_split_aces: bool = False,
 ) -> dict:
     """
     Create a new basic-strategy session and deal the first round.
@@ -255,6 +293,7 @@ def create_session(
     """
     _validate_new_session_args(
         num_decks, num_hands, penetration, dealer_hits_soft17, double_after_split, live_mode,
+        stand_on_split_aces,
     )
 
     shoe = generate_shoe(num_decks)
@@ -268,6 +307,7 @@ def create_session(
         'dealer_hits_soft17':   dealer_hits_soft17,
         'double_after_split':   double_after_split,
         'live_mode':            live_mode,
+        'stand_on_split_aces':  stand_on_split_aces,
         'shoe':                 shoe,
         'shoe_size':            shoe_size,
         'cutoff':               cutoff,
@@ -417,17 +457,42 @@ def apply_action(state: dict, action_code: str) -> dict:
     if action_code == SPLIT:
         if not hand['can_split']:
             raise ValueError("Split is not a legal move right now")
+        hand_index = round_['active_hand_index']
         card_a, card_b = hand['player_cards']
         new_card_1 = _draw_and_count(state)
         new_card_2 = _draw_and_count(state)
-        hand_1 = _new_hand([card_a, new_card_1], can_double=state['double_after_split'],
-                            can_split=False, is_split_hand=True)
-        hand_2 = _new_hand([card_b, new_card_2], can_double=state['double_after_split'],
-                            can_split=False, is_split_hand=True)
-        spot['hands'] = [hand_1, hand_2]
-        round_['active_hand_index'] = 0
+
+        spot['splits_used'] += 1
+        can_resplit = spot['splits_used'] < MAX_SPLITS_PER_SPOT
+        force_stand = card_a['rank'] == 'A' and state['stand_on_split_aces']
+
+        hand_1 = _new_hand(
+            [card_a, new_card_1],
+            can_double=state['double_after_split'] and not force_stand,
+            can_split=can_resplit and not force_stand and is_pair([card_a['rank'], new_card_1['rank']]),
+            is_split_hand=True,
+        )
+        hand_2 = _new_hand(
+            [card_b, new_card_2],
+            can_double=state['double_after_split'] and not force_stand,
+            can_split=can_resplit and not force_stand and is_pair([card_b['rank'], new_card_2['rank']]),
+            is_split_hand=True,
+        )
+        if force_stand:
+            hand_1['stage'] = 'awaiting_dealer'
+            hand_2['stage'] = 'awaiting_dealer'
+
+        # Splice the split hand out and its two children in, in place —
+        # a re-split must leave any OTHER already-split hand in this spot
+        # untouched (can't just overwrite spot['hands']).
+        spot['hands'][hand_index:hand_index + 1] = [hand_1, hand_2]
+        round_['active_hand_index'] = hand_index
         result['outcome'] = 'split'
         result['new_hands'] = [hand_1['player_cards'], hand_2['player_cards']]
+
+        if force_stand:
+            result['hand_finished'] = True
+            _advance_active_hand(state, round_)
 
     elif action_code == DOUBLE:
         if not hand['can_double']:
@@ -478,11 +543,7 @@ def apply_action(state: dict, action_code: str) -> dict:
         result['dealer_cards'] = round_['dealer_cards']
         result['dealer_total'] = dealer_total
 
-    if round_['stage'] == 'done':
-        result['round_finished'] = True
-        _finish_round(state)
-    else:
-        result['round_finished'] = False
+    result['round_finished'] = round_['stage'] == 'round_over'
 
     return result
 
@@ -569,6 +630,7 @@ def public_session_view(state: dict) -> dict:
         'dealer_hits_soft17':   state['dealer_hits_soft17'],
         'double_after_split':   state['double_after_split'],
         'live_mode':            state['live_mode'],
+        'stand_on_split_aces':  state['stand_on_split_aces'],
         'rounds_played':        state['rounds_played'],
         'hands_played':         state['hands_played'],
         'correct_decisions':    state['correct_decisions'],

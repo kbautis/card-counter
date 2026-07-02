@@ -22,6 +22,8 @@ from strategy_engine import (
     request_hint,
     check_count,
     stop_session,
+    start_next_round,
+    build_summary,
     public_session_view,
     MIN_HANDS,
     MAX_HANDS,
@@ -164,6 +166,7 @@ def new_strategy_session():
     dealer_hits_soft17  = data.get('dealer_hits_soft17', False)
     double_after_split  = data.get('double_after_split', True)
     live_mode           = data.get('live_mode', False)
+    stand_on_split_aces = data.get('stand_on_split_aces', False)
 
     if not isinstance(num_decks, int) or not (1 <= num_decks <= 8):
         return jsonify(error="num_decks must be an integer between 1 and 8"), 400
@@ -179,12 +182,14 @@ def new_strategy_session():
         return jsonify(error="double_after_split must be a boolean"), 400
     if not isinstance(live_mode, bool):
         return jsonify(error="live_mode must be a boolean"), 400
+    if not isinstance(stand_on_split_aces, bool):
+        return jsonify(error="stand_on_split_aces must be a boolean"), 400
 
     try:
         state = create_strategy_session(
             num_decks=num_decks, num_hands=num_hands, penetration=penetration,
             dealer_hits_soft17=dealer_hits_soft17, double_after_split=double_after_split,
-            live_mode=live_mode,
+            live_mode=live_mode, stand_on_split_aces=stand_on_split_aces,
         )
     except ValueError as e:
         return jsonify(error=str(e)), 400
@@ -221,12 +226,36 @@ def strategy_action():
     except ValueError as e:
         return jsonify(error=str(e)), 400
 
-    if state['done']:
-        del _STRATEGY_SESSIONS[data['session_id']]
-    else:
-        state['created_at'] = time.time()  # keep session alive while actively playing
+    # A round never auto-advances (see strategy_engine module docstring), so
+    # a session never ends itself mid-action — only Stop or next-round
+    # hitting the round cap can end it.
+    state['created_at'] = time.time()
 
     return jsonify({'result': result, 'session': public_session_view(state)})
+
+
+@app.post('/api/strategy/next-round')
+def strategy_next_round():
+    """Explicitly deal the next round once the current one is fully resolved."""
+    _purge_expired_strategy_sessions()
+
+    data = request.get_json(silent=True) or {}
+    state, err_response, err_code = _get_active_strategy_session(data)
+    if state is None:
+        return err_response, err_code
+
+    try:
+        start_next_round(state)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    if state['done']:
+        summary = build_summary(state)
+        del _STRATEGY_SESSIONS[data['session_id']]
+        return jsonify({'session': public_session_view(state), 'summary': summary})
+
+    state['created_at'] = time.time()
+    return jsonify({'session': public_session_view(state)})
 
 
 @app.post('/api/strategy/hint')

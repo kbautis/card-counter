@@ -762,8 +762,18 @@
         </select>
       </div>
     </div>
-    <p class="label-hint">Splits are fully playable (hit/stand/double each half — no re-splitting). Live mode
-      deviations shown are for a standard S17 game — exact indices shift slightly under H17.</p>
+    <div class="controls three-col">
+      <div class="control-group">
+        <label for="stratStandOnSplitAces">Split Aces</label>
+        <select id="stratStandOnSplitAces">
+          <option value="off" selected>Playable — hit/stand/double as normal</option>
+          <option value="on">Force stand — one card each, no further action</option>
+        </select>
+      </div>
+    </div>
+    <p class="label-hint">Splits are fully playable (hit/stand/double each half) and re-splittable once more
+      (up to 3 hands per spot). Live mode deviations shown are for a standard S17 game — exact indices shift
+      slightly under H17.</p>
     <button class="btn btn-primary" id="stratStartBtn">Start Playing</button>
   </div>
 
@@ -798,6 +808,7 @@
       <button class="btn btn-secondary" id="actDouble">Double</button>
       <button class="btn btn-secondary" id="actSplit">Split</button>
     </div>
+    <button class="btn btn-primary" id="stratNextRoundBtn" style="display:none">Next Hand →</button>
   </div>
 
   <div class="result-panel" id="stratSummaryPanel">
@@ -1351,6 +1362,7 @@ const stratStopBtn        = document.getElementById('stratStopBtn');
 const stratCheckCountBtn  = document.getElementById('stratCheckCountBtn');
 const stratCountDisplay   = document.getElementById('stratCountDisplay');
 const stratPlayAgainBtn   = document.getElementById('stratPlayAgainBtn');
+const stratNextRoundBtn   = document.getElementById('stratNextRoundBtn');
 
 const ACTION_NAMES = { H: 'Hit', S: 'Stand', D: 'Double', P: 'Split' };
 
@@ -1374,12 +1386,12 @@ function getActiveHand(session) {
 }
 
 function spotHandStatus(hand, spot) {
-  if (hand.stage === 'player_turn')     return { text: 'Your turn',          cls: 'pending' };
-  if (hand.stage === 'awaiting_dealer') return { text: 'Waiting on dealer',  cls: 'pending' };
-  if (hand.outcome === 'win')  return { text: spot.natural ? 'Blackjack!' : 'Win', cls: 'win' };
-  if (hand.outcome === 'loss') return { text: 'Loss', cls: 'loss' };
-  if (hand.outcome === 'push') return { text: 'Push', cls: 'push' };
-  return { text: '', cls: 'pending' };
+  if (hand.stage === 'player_turn')     return { text: 'Your turn',         cls: 'pending', icon: '' };
+  if (hand.stage === 'awaiting_dealer') return { text: 'Waiting on dealer', cls: 'pending', icon: '' };
+  if (hand.outcome === 'win')  return { text: spot.natural ? 'Blackjack!' : 'Win', cls: 'win',  icon: '✅' };
+  if (hand.outcome === 'loss') return { text: 'Loss',                              cls: 'loss', icon: '❌' };
+  if (hand.outcome === 'push') return { text: 'Push',                              cls: 'push', icon: '🤝' };
+  return { text: '', cls: 'pending', icon: '' };
 }
 
 function renderSpotHTML(spot, spotIndex, round) {
@@ -1391,13 +1403,13 @@ function renderSpotHTML(spot, spotIndex, round) {
       <div class="spot-hand ${isActiveHand ? 'active-hand' : ''}">
         <div class="hand-row">${hand.player_cards.map(c => miniCardHTML(c)).join('')}</div>
         <div class="hand-total">${hand.player_soft ? hand.player_total + ' (soft)' : hand.player_total}</div>
-        <div class="spot-status ${status.cls}">${status.text}${hand.hint_used ? ' · hint used' : ''}</div>
+        <div class="spot-status ${status.cls}">${status.icon} ${status.text}${hand.hint_used ? ' · hint used' : ''}</div>
       </div>
     `;
   }).join('');
   return `
     <div class="spot-block ${isActiveSpot ? 'active-spot' : ''}">
-      <div class="hand-label">Spot ${spotIndex + 1}${spot.hands.length > 1 ? ' (split)' : ''}</div>
+      <div class="hand-label">Spot ${spotIndex + 1}${spot.hands.length > 1 ? ` (split ×${spot.hands.length})` : ''}</div>
       ${handsHTML}
     </div>
   `;
@@ -1421,12 +1433,19 @@ function renderStratRound(session) {
 
   stratSpotsEl.innerHTML = round.spots.map((spot, si) => renderSpotHTML(spot, si, round)).join('');
 
+  const roundOver = round.stage === 'round_over';
   const active = getActiveHand(session);
   document.getElementById('actHit').disabled    = !active;
   document.getElementById('actStand').disabled  = !active;
   document.getElementById('actDouble').disabled = !active || !active.hand.can_double;
   document.getElementById('actSplit').disabled  = !active || !active.hand.can_split;
   stratHintBtn.disabled = !active;
+
+  // Round advancement is player-driven: once every hand is settled, the
+  // dealer's full hand and each spot's outcome stay on screen and action
+  // buttons give way to a single "Next Hand" button.
+  stratActions.style.display = roundOver ? 'none' : 'flex';
+  stratNextRoundBtn.style.display = roundOver ? 'block' : 'none';
 }
 
 function showStratFeedback(result) {
@@ -1472,11 +1491,15 @@ stratStartBtn.addEventListener('click', async () => {
   const dealer_hits_soft17 = document.getElementById('stratDealerRule').value === 'h17';
   const double_after_split = document.getElementById('stratDas').value === 'on';
   const live_mode          = document.getElementById('stratLiveMode').value === 'on';
+  const stand_on_split_aces = document.getElementById('stratStandOnSplitAces').value === 'on';
 
   const res = await fetch('/api/strategy/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ num_decks, num_hands, penetration, dealer_hits_soft17, double_after_split, live_mode }),
+    body: JSON.stringify({
+      num_decks, num_hands, penetration, dealer_hits_soft17, double_after_split, live_mode,
+      stand_on_split_aces,
+    }),
   });
 
   stratStartBtn.disabled = false;
@@ -1531,6 +1554,33 @@ document.getElementById('actHit').addEventListener('click', () => sendStratActio
 document.getElementById('actStand').addEventListener('click', () => sendStratAction('S'));
 document.getElementById('actDouble').addEventListener('click', () => sendStratAction('D'));
 document.getElementById('actSplit').addEventListener('click', () => sendStratAction('P'));
+
+stratNextRoundBtn.addEventListener('click', async () => {
+  stratNextRoundBtn.disabled = true;
+
+  const res = await fetch('/api/strategy/next-round', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: stratSessionId }),
+  });
+
+  stratNextRoundBtn.disabled = false;
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.error || 'Could not deal the next hand.');
+    return;
+  }
+
+  const data = await res.json();
+  if (data.summary) {
+    showStratSummary(data.summary);
+    return;
+  }
+  stratFeedback.style.display = 'none';
+  stratCountDisplay.style.display = 'none';
+  renderStratRound(data.session);
+});
 
 stratHintBtn.addEventListener('click', async () => {
   const res = await fetch('/api/strategy/hint', {
