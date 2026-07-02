@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Card Counter Trainer</title>
+<title>Blackjack Trainer</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <style>
   :root {
@@ -585,7 +585,7 @@
 <body>
 
 <header>
-  <h1>🃏 Card Counter Trainer</h1>
+  <h1>🃏 Blackjack Trainer</h1>
   <nav class="mode-tabs">
     <button class="tab-btn active" data-mode="count">Count Trainer</button>
     <button class="tab-btn" data-mode="strategy">Basic Strategy</button>
@@ -1431,21 +1431,34 @@ function renderStratRound(session) {
 
 function showStratFeedback(result) {
   const parts = [];
-  parts.push(result.was_correct
-    ? `✓ ${ACTION_NAMES[result.action_taken]} was correct basic strategy.`
-    : `✗ Basic strategy says ${ACTION_NAMES[result.correct_action]} — you chose ${ACTION_NAMES[result.action_taken]}.`);
-  if (result.hint_used) parts.push('(a hint was used on this hand — still scored)');
-  if (result.deviation_applicable) {
-    parts.push(result.deviation_was_correct
-      ? `✓ Count play (TC ${result.true_count_at_decision}) also correct: ${ACTION_NAMES[result.deviation_correct_action]}.`
-      : `✗ At TC ${result.true_count_at_decision}, the index play says ${ACTION_NAMES[result.deviation_correct_action]}.`);
+
+  // When a count deviation applies, the count-correct play is what actually
+  // matters — it should drive the overall correct/wrong verdict, not base
+  // basic strategy (a player who correctly deviates from basic strategy is
+  // right, not wrong, even though the two disagree).
+  const deviationDiffers = result.deviation_applicable && result.deviation_correct_action !== result.correct_action;
+  const overallCorrect = result.deviation_applicable ? result.deviation_was_correct : result.was_correct;
+
+  if (deviationDiffers) {
+    parts.push(`${overallCorrect ? '✓' : '✗'} At TC ${result.true_count_at_decision}, the count says `
+      + `<strong>${ACTION_NAMES[result.deviation_correct_action]}</strong> — that's what counts here `
+      + `(basic strategy alone would say ${ACTION_NAMES[result.correct_action]}).`);
+  } else if (result.deviation_applicable) {
+    parts.push(`${overallCorrect ? '✓' : '✗'} ${ACTION_NAMES[result.action_taken]} ${overallCorrect ? 'was' : 'was not'} correct `
+      + `(basic strategy and the count agree: ${ACTION_NAMES[result.deviation_correct_action]}).`);
+  } else {
+    parts.push(result.was_correct
+      ? `✓ ${ACTION_NAMES[result.action_taken]} was correct basic strategy.`
+      : `✗ Basic strategy says ${ACTION_NAMES[result.correct_action]} — you chose ${ACTION_NAMES[result.action_taken]}.`);
   }
+
+  if (result.hint_used) parts.push('(a hint was used on this hand — still scored)');
   if (result.hand_finished && result.outcome) {
     const outcomeText = { win: 'Hand won 🎉', loss: 'Hand lost', push: 'Push — a tie with the dealer', split: 'Split into two hands' }[result.outcome];
     if (outcomeText) parts.push(outcomeText);
   }
   stratFeedback.style.display = 'block';
-  stratFeedback.className = 'strat-feedback ' + (result.was_correct ? 'correct' : 'wrong');
+  stratFeedback.className = 'strat-feedback ' + (overallCorrect ? 'correct' : 'wrong');
   stratFeedback.innerHTML = parts.join('<br>');
 }
 
