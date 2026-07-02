@@ -147,12 +147,12 @@ None.
 ## 12. Task queue
 
 ### Task 1 — Rules-parameterized strategy chart (H17/S17 × DAS/no-DAS)
-- [ ] Rework `basic_strategy.py` so `correct_action()` takes two new required
+- [x] Rework `basic_strategy.py` so `correct_action()` takes two new required
       params: `dealer_hits_soft17: bool` and `double_after_split: bool`
-- [ ] Maintain **two full hard/soft tables** (H17 and S17) — do not try to
+- [x] Maintain **two full hard/soft tables** (H17 and S17) — do not try to
       express one as a diff of the other; transcribe both in full from the
       source data below. This eliminates guesswork.
-- [ ] The **pairs table is shared** between H17 and S17 (confirmed identical
+- [x] The **pairs table is shared** between H17 and S17 (confirmed identical
       in both source PDFs) but has 5 cells whose value depends on
       `double_after_split`: 6,6v2 · 4,4v5 · 4,4v6 · 3,3v2 · 3,3v3 · 2,2v2 · 2,2v3
       marked `Y/N` in the source — resolve to `SPLIT` if `double_after_split`
@@ -231,71 +231,71 @@ A,A:   Y Y Y Y Y Y Y Y Y Y
 3,3:   Y/N Y/N Y Y Y Y N N N N
 2,2:   Y/N Y/N Y Y Y Y N N N N
 ```
-- [ ] `pytest tests/test_basic_strategy.py -v` — new tests cover at minimum:
+- [x] `pytest tests/test_basic_strategy.py -v` — new tests cover at minimum:
       11 vs A under both rulesets (the clearest H17/S17 divergence), A,8 vs 6
       under both rulesets, and all 5 DAS-dependent pair cells under both
       `double_after_split=True` and `False`
 
 ### Task 2 — Table config API
-- [ ] `POST /api/strategy/session` accepts: `num_decks` (1–8), `penetration`,
+- [x] `POST /api/strategy/session` accepts: `num_decks` (1–8), `penetration`,
       `dealer_hits_soft17` (bool), `double_after_split` (bool), `num_hands`
       (simultaneous spots, validate 1–6 inclusive — 6 is the realistic cap for
       a full live table), `live_mode` (bool, default False)
-- [ ] Drop the old `num_hands` = "total rounds to play" meaning entirely —
+- [x] Drop the old `num_hands` = "total rounds to play" meaning entirely —
       replace with open-ended play (rounds continue until Stop or shoe
       exhaustion forces it). `num_hands` now means simultaneous spots per round.
-- [ ] Validate all params fail-fast per existing `_validate_new_session_args` style
-- [ ] `pytest` — config validation tests for each new param, including the
+- [x] Validate all params fail-fast per existing `_validate_new_session_args` style
+- [x] `pytest` — config validation tests for each new param, including the
       1–6 `num_hands` boundary
 
 ### Task 3 — Multi-spot dealing, dealer peek, player naturals
-- [ ] Each round deals `num_hands` independent spots plus one dealer hand
-- [ ] If dealer up-card is Ace or 10: peek the hole card. If dealer has
+- [x] Each round deals `num_hands` independent spots plus one dealer hand
+- [x] If dealer up-card is Ace or 10: peek the hole card. If dealer has
       blackjack, reveal it immediately and resolve **every spot** with no
       player decisions offered (player blackjack on a spot = push against
       dealer blackjack; anything else = loss)
-- [ ] If dealer does not have blackjack (or up-card wasn't A/10), check each
+- [x] If dealer does not have blackjack (or up-card wasn't A/10), check each
       spot for a player natural blackjack. Any spot with a natural
       auto-resolves as a win immediately — no hit/stand/double/split offered
       for that spot, even though the dealer hasn't played yet
-- [ ] Remaining (non-blackjack) spots proceed to player decisions in spot
+- [x] Remaining (non-blackjack) spots proceed to player decisions in spot
       order (spot 1, then spot 2, etc.)
-- [ ] Dealer plays out **once per round**, after all spots have reached a
+- [x] Dealer plays out **once per round**, after all spots have reached a
       terminal state, and resolves against each spot that's still live
       (standard live-table behavior — one dealer hand serves all spots)
-- [ ] `pytest` — cover: dealer blackjack ends round with no decisions, player
+- [x] `pytest` — cover: dealer blackjack ends round with no decisions, player
       natural auto-resolves without offering actions, mixed round (one spot
       natural, one spot normal) resolves correctly, dealer plays once and
       settles all live spots
 
 ### Task 4 — Playable split hands
-- [ ] When a spot's initial two cards are a pair and the player splits, that
+- [x] When a spot's initial two cards are a pair and the player splits, that
       spot becomes two independently playable hands (each can hit/stand/double
       — no re-splitting; this is a deliberate simplification, same spirit as
       the current codebase's existing simplifications, and should be commented
       as such)
-- [ ] Each split hand is scored against basic strategy independently as the
+- [x] Each split hand is scored against basic strategy independently as the
       player acts on it
-- [ ] Dealer's single per-round hand resolves against both split hands
-- [ ] `pytest` — split hand becomes two playable hands, hitting one doesn't
+- [x] Dealer's single per-round hand resolves against both split hands
+- [x] `pytest` — split hand becomes two playable hands, hitting one doesn't
       affect the other, doubling on a split hand works, busting one split hand
       doesn't end the other
 
 ### Task 5 — Hint button
-- [ ] New endpoint `POST /api/strategy/hint` — takes `session_id` and enough
+- [x] New endpoint `POST /api/strategy/hint` — takes `session_id` and enough
       info to identify the active hand, returns the correct action **without**
       mutating game state, and flags that hand as "hint used"
-- [ ] When the player's subsequent real action is applied via
+- [x] When the player's subsequent real action is applied via
       `/api/strategy/action`, the result includes `hint_used: bool`
-- [ ] Accuracy scoring still counts hint-used decisions toward
+- [x] Accuracy scoring still counts hint-used decisions toward
       `correct_decisions`/`total_decisions` (confirmed with the user — hints
       count, just get tagged separately), but track a **separate**
       `hint_used_count` in session state for the summary
-- [ ] `pytest` — hint doesn't mutate state, hint-used decisions still score
+- [x] `pytest` — hint doesn't mutate state, hint-used decisions still score
       normally, hint count accumulates correctly
 
 ### Task 6 — Live mode: true count + Illustrious 18 deviations
-- [ ] New file `deviations.py` — table of index plays keyed by
+- [x] New file `deviations.py` — table of index plays keyed by
       `(hand_description, dealer_upcard)` → `{threshold, direction, deviate_to}`,
       transcribed from the source below. `direction` is `'+'` (deviate at or
       above threshold) or `'-'` (deviate at or below threshold)
@@ -327,80 +327,80 @@ standard S17 game; exact indices shift slightly under H17") rather than
 silently applying S17 indices to an H17 table. Building H17-specific
 deviations is out of scope for this pass (see Stretch Features).
 
-- [ ] Reuse `card_engine.hi_lo_value()` / `calculate_count()` /
+- [x] Reuse `card_engine.hi_lo_value()` / `calculate_count()` /
       `calculate_true_count()` for the running/true count — do not duplicate
       this logic in `strategy_engine.py` or `deviations.py`
-- [ ] Session tracks running count internally at all times once `live_mode`
+- [x] Session tracks running count internally at all times once `live_mode`
       is True (increment as cards are dealt/drawn — dealer hole card only
       counts once revealed, matching real-table counting practice)
-- [ ] New field on the hand view: when `live_mode` is True, the client can
+- [x] New field on the hand view: when `live_mode` is True, the client can
       request the current true count on demand (a "check count" action) —
       it is not pushed automatically, matching the brief's "if they want to" framing
-- [ ] For each decision made in `live_mode`, check `deviations.py` for a
+- [x] For each decision made in `live_mode`, check `deviations.py` for a
       matching entry. If one exists, compute whether the deviation-correct
       play differs from the true count at decision time, and score
       `deviation_correct`/`deviation_total` **separately** from base
       `correct_decisions`/`total_decisions` — a deviation decision should
       not double-count against base strategy accuracy
-- [ ] `pytest` — true count reused correctly from `card_engine`, deviation
+- [x] `pytest` — true count reused correctly from `card_engine`, deviation
       lookup returns correct threshold comparisons for both `+` and `-`
       directions, deviation scoring is tracked separately from base accuracy
 
 ### Task 7 — Stop button + end-of-session summary
-- [ ] New endpoint `POST /api/strategy/stop` — takes `session_id`, ends the
+- [x] New endpoint `POST /api/strategy/stop` — takes `session_id`, ends the
       session immediately (mid-shoe, mid-round is fine — just stop cleanly,
       don't force the current round to finish), deletes it from
       `_STRATEGY_SESSIONS`, and returns a summary payload
-- [ ] Natural end of session (if you choose to keep any session-length cap —
+- [x] Natural end of session (if you choose to keep any session-length cap —
       otherwise sessions only end via Stop or shoe exhaustion after many
       reshuffles, either is fine) returns the **same summary shape**
-- [ ] Summary payload includes: hands played, wins/losses/pushes, basic
+- [x] Summary payload includes: hands played, wins/losses/pushes, basic
       strategy accuracy % (`correct_decisions / total_decisions`), hint-used
       count, and — only if `live_mode` was on — deviation accuracy %
       (`deviation_correct / deviation_total`) reported separately from base
       accuracy
-- [ ] `pytest` — stop mid-round returns a valid summary, summary math is
+- [x] `pytest` — stop mid-round returns a valid summary, summary math is
       correct against known fixture state, live-mode-off sessions omit the
       deviation accuracy field entirely (not just zero it out)
 
 ### Task 8 — Frontend (`static/index.html`)
-- [ ] Table config screen: decks, penetration, H17/S17 toggle, DAS toggle,
+- [x] Table config screen: decks, penetration, H17/S17 toggle, DAS toggle,
       number of simultaneous hands (1–6), Live mode toggle
-- [ ] Multi-hand table view: all active spots visible, clear indicator of
+- [x] Multi-hand table view: all active spots visible, clear indicator of
       which spot/hand is currently awaiting a decision, dealer up-card (and
       hole card once revealed) visible to all
-- [ ] Hint button on the active hand
-- [ ] Stop button always visible during play
-- [ ] Live mode: a "check my count" control that reveals running/true count
+- [x] Hint button on the active hand
+- [x] Stop button always visible during play
+- [x] Live mode: a "check my count" control that reveals running/true count
       on demand, not automatically
-- [ ] Summary screen on session end: same fields as the Task 7 payload,
+- [x] Summary screen on session end: same fields as the Task 7 payload,
       rendered clearly (accuracy % prominent, deviation accuracy shown
       separately and only when Live mode was used)
-- [ ] Manual verification: run the app, play at least one full round with 3+
+- [x] Manual verification: run the app, play at least one full round with 3+
       simultaneous hands including a split, confirm dealer peek and player
       blackjack auto-resolve visually, confirm Stop produces a summary
 
 ### Task 9 — Full regression pass
-- [ ] `python -m pytest tests/ -v` — entire suite green, including untouched
+- [x] `python -m pytest tests/ -v` — entire suite green, including untouched
       Count Trainer tests (confirm no regression)
-- [ ] Fact-checker pass specifically on `basic_strategy.py` and
+- [x] Fact-checker pass specifically on `basic_strategy.py` and
       `deviations.py` — every transcribed chart cell checked against Section
       12 Task 1 and this task's source block, not against memory or
       assumption
 
 ## 13. Definition of done
 
-- [ ] All tasks above checked off
-- [ ] All rule combinations (S17/H17 × DAS/no-DAS) produce strategy-correct
+- [x] All tasks above checked off
+- [x] All rule combinations (S17/H17 × DAS/no-DAS) produce strategy-correct
       answers matching the transcribed source charts
-- [ ] Split hands are fully playable through to resolution
-- [ ] Dealer peek and player-natural auto-resolve both work without offering
+- [x] Split hands are fully playable through to resolution
+- [x] Dealer peek and player-natural auto-resolve both work without offering
       illegal decisions
-- [ ] Hint button works and is tracked separately without altering scored accuracy
-- [ ] Live mode correctly separates deviation accuracy from base strategy accuracy
-- [ ] Stop button and natural session end both produce the same summary shape
-- [ ] All tests passing
-- [ ] Written retrospective completed
+- [x] Hint button works and is tracked separately without altering scored accuracy
+- [x] Live mode correctly separates deviation accuracy from base strategy accuracy
+- [x] Stop button and natural session end both produce the same summary shape
+- [x] All tests passing
+- [x] Written retrospective completed
 
 ## 14. Stretch features (only after definition of done is met)
 
@@ -422,3 +422,58 @@ deviations is out of scope for this pass (see Stretch Features).
 - Can you explain why a Y/N pair-split chart cell is resolved at
   chart-lookup time based on the table ruleset, rather than via the existing
   `_downgrade()` runtime-legality function?
+
+## 16. Retrospective
+
+**DAS vs H17/S17 — why they touch different cells.** DAS only governs whether
+a *split-produced* hand may double — it's irrelevant to a hand that was never
+split. So it can only change the answer for pairs sitting exactly on the
+line between "worth splitting only if I can also double after" (5 cells:
+6,6v2 · 4,4v5 · 4,4v6 · 3,3v2/v3 · 2,2v2/v3) — pairs whose hard-total fallback
+is already correct basic strategy either way, just worse than splitting when
+doubling is available. H17 vs S17 is a completely different axis: it only
+changes whether the *dealer* draws on a soft 17, which shifts the dealer's
+bust probability enough to flip a handful of borderline hard/soft decisions
+(11 vs A, A,7 vs 2, A,8 vs 6) that have nothing to do with pairs or splitting
+at all. One is a "can I double after this" question; the other is "does the
+dealer take one more card." Different mechanics, so no overlap in which
+cells move — confirmed by the fact-check script cross-referencing every cell
+against Section 12's source tables independent of how they were derived.
+
+**Why deviation accuracy can't be folded into base accuracy.** They answer
+different questions. Base accuracy asks "did you play the hand basic
+strategy says to play, ignoring the count." Deviation accuracy asks "given
+the count right now, did you play the Illustrious-18-adjusted play." A
+count-aware player who *correctly* deviates from basic strategy (e.g. stands
+on 16 vs 9 at a true count of +4) is *wrong* by the base-accuracy metric and
+*right* by the deviation metric — summing them into one counter would either
+punish good count play or hide bad basic-strategy fundamentals. Keeping
+`correct_decisions/total_decisions` and `deviation_correct/deviation_total`
+as two independent counters (only the latter incremented when an
+Illustrious 18 entry actually applies to that exact hand/upcard/legality
+combination) lets the summary report both skills honestly instead of
+blending them into a meaningless average.
+
+**Round order, from memory:** deal two cards to each spot and the dealer
+(round-robin, hole card last) → if the dealer's up-card is A/10, peek the
+hole card; a dealer blackjack ends the round immediately with no decisions
+offered (push any player 21, lose everything else) → otherwise, any spot
+holding a two-card 21 auto-resolves as an immediate win, no decision offered
+→ remaining spots play in order, hand-by-hand within a split spot (no
+re-splitting) → once every hand is either busted-and-settled or
+awaiting the dealer, the dealer plays its *single* hand once and that one
+result settles every hand still live → next round deals automatically
+unless the session was stopped or hit the round cap.
+
+**Why `_resolve_das_pair_cell` is separate from `_downgrade`.** They answer
+different questions at different times. `_resolve_das_pair_cell` runs at
+chart-lookup time and asks "given this *table's* ruleset, what does the
+chart say for this pair cell" — a property of the table, fixed for the whole
+session. `_downgrade` runs at decision time and asks "is the chart's answer
+*legal on this specific hand right now*" — e.g. can't double after already
+hitting, can't split again. Conflating them would mean a hand that
+legitimately can't double (say, after a hit) could get misread as "DAS is
+off," silently corrupting the chart lookup for a reason that has nothing to
+do with the table's rules at all. Keeping them separate — and separately
+named — makes it possible to reason about (and fact-check) each in
+isolation, which is exactly what the Task 1 fact-check script does.

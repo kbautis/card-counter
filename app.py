@@ -19,6 +19,9 @@ from card_engine import create_session, verify_answer, calculate_true_count, MIN
 from strategy_engine import (
     create_session as create_strategy_session,
     apply_action as apply_strategy_action,
+    request_hint,
+    check_count,
+    stop_session,
     public_session_view,
     MIN_HANDS,
     MAX_HANDS,
@@ -151,13 +154,16 @@ def verify():
 
 @app.post('/api/strategy/session')
 def new_strategy_session():
-    """Start a new Basic Strategy hand-play session."""
+    """Start a new Basic Strategy live-table session (table config -> first round dealt)."""
     _purge_expired_strategy_sessions()
 
-    data        = request.get_json(silent=True) or {}
-    num_decks   = data.get('num_decks', 4)
-    num_hands   = data.get('num_hands', 10)
-    penetration = data.get('penetration', 0.75)
+    data                = request.get_json(silent=True) or {}
+    num_decks           = data.get('num_decks', 4)
+    num_hands           = data.get('num_hands', 1)
+    penetration         = data.get('penetration', 0.75)
+    dealer_hits_soft17  = data.get('dealer_hits_soft17', False)
+    double_after_split  = data.get('double_after_split', True)
+    live_mode           = data.get('live_mode', False)
 
     if not isinstance(num_decks, int) or not (1 <= num_decks <= 8):
         return jsonify(error="num_decks must be an integer between 1 and 8"), 400
@@ -167,10 +173,18 @@ def new_strategy_session():
         ), 400
     if not isinstance(penetration, (int, float)) or not (0 < penetration <= 1):
         return jsonify(error="penetration must be a number between 0 (exclusive) and 1"), 400
+    if not isinstance(dealer_hits_soft17, bool):
+        return jsonify(error="dealer_hits_soft17 must be a boolean"), 400
+    if not isinstance(double_after_split, bool):
+        return jsonify(error="double_after_split must be a boolean"), 400
+    if not isinstance(live_mode, bool):
+        return jsonify(error="live_mode must be a boolean"), 400
 
     try:
         state = create_strategy_session(
             num_decks=num_decks, num_hands=num_hands, penetration=penetration,
+            dealer_hits_soft17=dealer_hits_soft17, double_after_split=double_after_split,
+            live_mode=live_mode,
         )
     except ValueError as e:
         return jsonify(error=str(e)), 400
@@ -182,21 +196,25 @@ def new_strategy_session():
     return jsonify({'session_id': session_id, **public_session_view(state)})
 
 
+def _get_active_strategy_session(data):
+    session_id = data.get('session_id')
+    if not session_id or session_id not in _STRATEGY_SESSIONS:
+        return None, jsonify(error="Invalid or expired session — start a new game first"), 400
+    return _STRATEGY_SESSIONS[session_id], None, None
+
+
 @app.post('/api/strategy/action')
 def strategy_action():
-    """Apply a Hit/Stand/Double/Split decision to the active hand."""
+    """Apply a Hit/Stand/Double/Split decision to the hand currently awaiting one."""
     _purge_expired_strategy_sessions()
 
-    data       = request.get_json(silent=True) or {}
-    session_id = data.get('session_id')
-    action     = data.get('action')
-
-    if not session_id or session_id not in _STRATEGY_SESSIONS:
-        return jsonify(error="Invalid or expired session — start a new game first"), 400
+    data   = request.get_json(silent=True) or {}
+    action = data.get('action')
+    state, err_response, err_code = _get_active_strategy_session(data)
+    if state is None:
+        return err_response, err_code
     if action not in (HIT, STAND, DOUBLE, SPLIT):
         return jsonify(error=f"action must be one of {HIT!r}, {STAND!r}, {DOUBLE!r}, {SPLIT!r}"), 400
-
-    state = _STRATEGY_SESSIONS[session_id]
 
     try:
         result = apply_strategy_action(state, action)
@@ -204,11 +222,63 @@ def strategy_action():
         return jsonify(error=str(e)), 400
 
     if state['done']:
-        del _STRATEGY_SESSIONS[session_id]
+        del _STRATEGY_SESSIONS[data['session_id']]
     else:
         state['created_at'] = time.time()  # keep session alive while actively playing
 
     return jsonify({'result': result, 'session': public_session_view(state)})
+
+
+@app.post('/api/strategy/hint')
+def strategy_hint():
+    """Return the correct action for the active hand without mutating game state."""
+    _purge_expired_strategy_sessions()
+
+    data = request.get_json(silent=True) or {}
+    state, err_response, err_code = _get_active_strategy_session(data)
+    if state is None:
+        return err_response, err_code
+
+    try:
+        hint = request_hint(state)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    return jsonify({'hint': hint, 'session': public_session_view(state)})
+
+
+@app.post('/api/strategy/check-count')
+def strategy_check_count():
+    """Live mode only: reveal the running/true count on demand."""
+    _purge_expired_strategy_sessions()
+
+    data = request.get_json(silent=True) or {}
+    state, err_response, err_code = _get_active_strategy_session(data)
+    if state is None:
+        return err_response, err_code
+
+    try:
+        count = check_count(state)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    return jsonify(count)
+
+
+@app.post('/api/strategy/stop')
+def strategy_stop():
+    """End a session immediately (mid-round is fine) and return the summary."""
+    _purge_expired_strategy_sessions()
+
+    data = request.get_json(silent=True) or {}
+    state, err_response, err_code = _get_active_strategy_session(data)
+    if state is None:
+        return err_response, err_code
+
+    summary = stop_session(state)
+    del _STRATEGY_SESSIONS[data['session_id']]
+
+    return jsonify({'summary': summary})
 
 
 if __name__ == '__main__':

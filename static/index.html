@@ -484,6 +484,53 @@
 
   .strat-outcome strong { color: var(--text); }
 
+  /* ── Multi-spot table view ── */
+  .spots-wrap { display: flex; gap: 0.85rem; flex-wrap: wrap; }
+
+  .spot-block {
+    flex: 1;
+    min-width: 150px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .spot-block.active-spot { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+
+  .spot-hand { display: flex; flex-direction: column; gap: 0.35rem; }
+
+  .spot-hand.active-hand {
+    outline: 2px dashed var(--gold);
+    outline-offset: 4px;
+    border-radius: 8px;
+    padding: 3px;
+  }
+
+  .spot-hand .hand-row { min-height: 66px; }
+  .spot-hand .mini-card { width: 46px; height: 66px; }
+  .spot-hand .mini-card .r { font-size: 0.9rem; }
+  .spot-hand .mini-card .s { font-size: 1rem; }
+  .spot-hand .hand-total { font-size: 0.95rem; }
+
+  .spot-status {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: center;
+    padding: 0.2rem;
+    border-radius: 6px;
+  }
+
+  .spot-status.win     { color: var(--green); background: rgba(34,197,94,0.12); }
+  .spot-status.loss    { color: var(--red);   background: rgba(239,68,68,0.12); }
+  .spot-status.push    { color: var(--gold);  background: rgba(245,158,11,0.12); }
+  .spot-status.pending { color: var(--muted); }
+
   /* ── History view ── */
   .history-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 
@@ -659,7 +706,7 @@
 <div class="view" id="view-strategy">
 
   <div class="setup-panel" id="stratSetupPanel">
-    <h2>Basic Strategy Setup</h2>
+    <h2>Table Setup</h2>
     <div class="controls three-col">
       <div class="control-group">
         <label for="stratNumDecks">Number of Decks</label>
@@ -672,12 +719,14 @@
         </select>
       </div>
       <div class="control-group">
-        <label for="stratNumHands">Number of Hands</label>
+        <label for="stratNumHands">Simultaneous Hands</label>
         <select id="stratNumHands">
+          <option value="1" selected>1 hand</option>
+          <option value="2">2 hands</option>
+          <option value="3">3 hands</option>
+          <option value="4">4 hands</option>
           <option value="5">5 hands</option>
-          <option value="10" selected>10 hands</option>
-          <option value="20">20 hands</option>
-          <option value="50">50 hands</option>
+          <option value="6">6 hands</option>
         </select>
       </div>
       <div class="control-group">
@@ -690,15 +739,45 @@
         </select>
       </div>
     </div>
-    <p class="label-hint">Dealer stands on soft 17. Splits are scored for the decision but not replayed as two hands.</p>
-    <button class="btn btn-primary" id="stratStartBtn">Start Hands</button>
+    <div class="controls three-col">
+      <div class="control-group">
+        <label for="stratDealerRule">Dealer Rule</label>
+        <select id="stratDealerRule">
+          <option value="s17" selected>Stands on soft 17 (S17)</option>
+          <option value="h17">Hits soft 17 (H17)</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="stratDas">Double After Split</label>
+        <select id="stratDas">
+          <option value="on" selected>Allowed (DAS)</option>
+          <option value="off">Not allowed</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="stratLiveMode">Live Mode</label>
+        <select id="stratLiveMode">
+          <option value="off" selected>Off — basic strategy only</option>
+          <option value="on">On — track the count + index plays</option>
+        </select>
+      </div>
+    </div>
+    <p class="label-hint">Splits are fully playable (hit/stand/double each half — no re-splitting). Live mode
+      deviations shown are for a standard S17 game — exact indices shift slightly under H17.</p>
+    <button class="btn btn-primary" id="stratStartBtn">Start Playing</button>
   </div>
 
   <div class="game-area" id="stratGameArea">
     <div class="progress-info">
-      <span id="stratHandCounter">Hand 1 of 10</span>
-      <span id="stratAccuracy">Accuracy: —</span>
+      <span id="stratRoundCounter">Round 1</span>
+      <div class="progress-actions">
+        <span id="stratAccuracy">Accuracy: —</span>
+        <button class="btn btn-hint" id="stratCheckCountBtn" style="display:none">Check Count</button>
+        <button class="btn btn-hint" id="stratHintBtn">Hint</button>
+        <button class="btn btn-danger" id="stratStopBtn">Stop</button>
+      </div>
     </div>
+    <p class="label-hint" id="stratCountDisplay" style="display:none"></p>
 
     <div class="table-stage">
       <div class="hand-block">
@@ -708,17 +787,10 @@
         </div>
         <div class="hand-row" id="stratDealerCards"></div>
       </div>
-      <div class="hand-block">
-        <div class="hand-label-row">
-          <span class="hand-label">You</span>
-          <span class="hand-total" id="stratPlayerTotal"></span>
-        </div>
-        <div class="hand-row" id="stratPlayerCards"></div>
-      </div>
+      <div class="spots-wrap" id="stratSpots"></div>
     </div>
 
     <div class="strat-feedback" id="stratFeedback" style="display:none"></div>
-    <div class="strat-outcome" id="stratOutcome" style="display:none"></div>
 
     <div class="action-row" id="stratActions">
       <button class="btn btn-primary"   id="actHit">Hit</button>
@@ -726,8 +798,6 @@
       <button class="btn btn-secondary" id="actDouble">Double</button>
       <button class="btn btn-secondary" id="actSplit">Split</button>
     </div>
-    <button class="btn btn-secondary" id="stratNextBtn" style="display:none">Next Hand →</button>
-    <button class="btn btn-secondary" id="stratBackBtn">← Back to Menu</button>
   </div>
 
   <div class="result-panel" id="stratSummaryPanel">
@@ -897,7 +967,7 @@ function renderHistory() {
         <td>${h.num_decks} decks · ${h.cards_shown}/${h.total_shoe_size} cards</td>
       </tr>`;
     }
-    const pct = Math.round(100 * h.correct_decisions / h.total_decisions);
+    const pct = h.total_decisions ? Math.round(100 * h.correct_decisions / h.total_decisions) : 0;
     return `<tr>
       <td>${date}</td><td>Strategy</td>
       <td>${pct}% correct (${h.correct_decisions}/${h.total_decisions})</td>
@@ -1259,26 +1329,28 @@ function resetToMenu() {
 playAgainBtn.addEventListener('click', resetToMenu);
 backToMenuBtn.addEventListener('click', resetToMenu);
 
-// ═══════════════════════════ BASIC STRATEGY TRAINER ══════════════════════════
+// ═══════════════════════════ BASIC STRATEGY TRAINER (live-table sim) ═════════
 
 let stratSessionId = null;
+let stratLiveMode  = false;
+let stratSession   = null;
 
-const stratSetupPanel   = document.getElementById('stratSetupPanel');
-const stratGameArea     = document.getElementById('stratGameArea');
-const stratSummaryPanel = document.getElementById('stratSummaryPanel');
-const stratStartBtn     = document.getElementById('stratStartBtn');
-const stratHandCounter  = document.getElementById('stratHandCounter');
-const stratAccuracyEl   = document.getElementById('stratAccuracy');
-const stratDealerCards  = document.getElementById('stratDealerCards');
-const stratPlayerCards  = document.getElementById('stratPlayerCards');
-const stratDealerTotal  = document.getElementById('stratDealerTotal');
-const stratPlayerTotal  = document.getElementById('stratPlayerTotal');
-const stratFeedback     = document.getElementById('stratFeedback');
-const stratOutcome      = document.getElementById('stratOutcome');
-const stratActions      = document.getElementById('stratActions');
-const stratNextBtn      = document.getElementById('stratNextBtn');
-const stratBackBtn      = document.getElementById('stratBackBtn');
-const stratPlayAgainBtn = document.getElementById('stratPlayAgainBtn');
+const stratSetupPanel     = document.getElementById('stratSetupPanel');
+const stratGameArea       = document.getElementById('stratGameArea');
+const stratSummaryPanel   = document.getElementById('stratSummaryPanel');
+const stratStartBtn       = document.getElementById('stratStartBtn');
+const stratRoundCounter   = document.getElementById('stratRoundCounter');
+const stratAccuracyEl     = document.getElementById('stratAccuracy');
+const stratDealerCards    = document.getElementById('stratDealerCards');
+const stratDealerTotal    = document.getElementById('stratDealerTotal');
+const stratSpotsEl        = document.getElementById('stratSpots');
+const stratFeedback       = document.getElementById('stratFeedback');
+const stratActions        = document.getElementById('stratActions');
+const stratHintBtn        = document.getElementById('stratHintBtn');
+const stratStopBtn        = document.getElementById('stratStopBtn');
+const stratCheckCountBtn  = document.getElementById('stratCheckCountBtn');
+const stratCountDisplay   = document.getElementById('stratCountDisplay');
+const stratPlayAgainBtn   = document.getElementById('stratPlayAgainBtn');
 
 const ACTION_NAMES = { H: 'Hit', S: 'Stand', D: 'Double', P: 'Split' };
 
@@ -1293,49 +1365,109 @@ function miniCardHTML(card, faceDown = false) {
   `;
 }
 
-function renderStratHand(hand) {
-  const holeHidden = hand.dealer_cards.length === 1;
-  stratDealerCards.innerHTML = hand.dealer_cards.map(c => miniCardHTML(c)).join('')
-    + (holeHidden ? miniCardHTML(null, true) : '');
-  stratDealerTotal.textContent = holeHidden ? `showing ${hand.dealer_upcard.rank}` : `${hand.dealer_total}`;
-
-  stratPlayerCards.innerHTML = hand.player_cards.map(c => miniCardHTML(c)).join('');
-  stratPlayerTotal.textContent = hand.player_soft ? `${hand.player_total} (soft)` : `${hand.player_total}`;
-
-  document.getElementById('actHit').disabled    = false;
-  document.getElementById('actStand').disabled  = false;
-  document.getElementById('actDouble').disabled = !hand.can_double;
-  document.getElementById('actSplit').disabled  = !hand.can_split;
-
-  stratActions.style.display = 'flex';
-  stratNextBtn.style.display = 'none';
-  stratFeedback.style.display = 'none';
-  stratOutcome.style.display = 'none';
+function getActiveHand(session) {
+  const round = session.round;
+  if (!round || round.active_spot_index === null || round.active_spot_index === undefined) return null;
+  const spot = round.spots[round.active_spot_index];
+  const hand = spot.hands[round.active_hand_index];
+  return { spot, hand, spotIndex: round.active_spot_index, handIndex: round.active_hand_index };
 }
 
-function updateStratProgress(session) {
-  stratHandCounter.textContent = `Hand ${Math.min(session.hands_played + 1, session.num_hands)} of ${session.num_hands}`;
+function spotHandStatus(hand, spot) {
+  if (hand.stage === 'player_turn')     return { text: 'Your turn',          cls: 'pending' };
+  if (hand.stage === 'awaiting_dealer') return { text: 'Waiting on dealer',  cls: 'pending' };
+  if (hand.outcome === 'win')  return { text: spot.natural ? 'Blackjack!' : 'Win', cls: 'win' };
+  if (hand.outcome === 'loss') return { text: 'Loss', cls: 'loss' };
+  if (hand.outcome === 'push') return { text: 'Push', cls: 'push' };
+  return { text: '', cls: 'pending' };
+}
+
+function renderSpotHTML(spot, spotIndex, round) {
+  const isActiveSpot = round.active_spot_index === spotIndex;
+  const handsHTML = spot.hands.map((hand, hi) => {
+    const isActiveHand = isActiveSpot && round.active_hand_index === hi;
+    const status = spotHandStatus(hand, spot);
+    return `
+      <div class="spot-hand ${isActiveHand ? 'active-hand' : ''}">
+        <div class="hand-row">${hand.player_cards.map(c => miniCardHTML(c)).join('')}</div>
+        <div class="hand-total">${hand.player_soft ? hand.player_total + ' (soft)' : hand.player_total}</div>
+        <div class="spot-status ${status.cls}">${status.text}${hand.hint_used ? ' · hint used' : ''}</div>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="spot-block ${isActiveSpot ? 'active-spot' : ''}">
+      <div class="hand-label">Spot ${spotIndex + 1}${spot.hands.length > 1 ? ' (split)' : ''}</div>
+      ${handsHTML}
+    </div>
+  `;
+}
+
+function renderStratRound(session) {
+  stratSession = session;
+  const round = session.round;
+
+  stratRoundCounter.textContent = `Round ${session.rounds_played + 1}`;
   stratAccuracyEl.textContent = session.total_decisions
     ? `Accuracy: ${Math.round(100 * session.correct_decisions / session.total_decisions)}% (${session.correct_decisions}/${session.total_decisions})`
     : 'Accuracy: —';
+
+  if (!round) return;
+
+  const holeHidden = round.dealer_cards.length === 1;
+  stratDealerCards.innerHTML = round.dealer_cards.map(c => miniCardHTML(c)).join('')
+    + (holeHidden ? miniCardHTML(null, true) : '');
+  stratDealerTotal.textContent = holeHidden ? `showing ${round.dealer_cards[0].rank}` : `${round.dealer_total}`;
+
+  stratSpotsEl.innerHTML = round.spots.map((spot, si) => renderSpotHTML(spot, si, round)).join('');
+
+  const active = getActiveHand(session);
+  document.getElementById('actHit').disabled    = !active;
+  document.getElementById('actStand').disabled  = !active;
+  document.getElementById('actDouble').disabled = !active || !active.hand.can_double;
+  document.getElementById('actSplit').disabled  = !active || !active.hand.can_split;
+  stratHintBtn.disabled = !active;
+}
+
+function showStratFeedback(result) {
+  const parts = [];
+  parts.push(result.was_correct
+    ? `✓ ${ACTION_NAMES[result.action_taken]} was correct basic strategy.`
+    : `✗ Basic strategy says ${ACTION_NAMES[result.correct_action]} — you chose ${ACTION_NAMES[result.action_taken]}.`);
+  if (result.hint_used) parts.push('(a hint was used on this hand — still scored)');
+  if (result.deviation_applicable) {
+    parts.push(result.deviation_was_correct
+      ? `✓ Count play (TC ${result.true_count_at_decision}) also correct: ${ACTION_NAMES[result.deviation_correct_action]}.`
+      : `✗ At TC ${result.true_count_at_decision}, the index play says ${ACTION_NAMES[result.deviation_correct_action]}.`);
+  }
+  if (result.hand_finished && result.outcome) {
+    const outcomeText = { win: 'Hand won 🎉', loss: 'Hand lost', push: 'Push — a tie with the dealer', split: 'Split into two hands' }[result.outcome];
+    if (outcomeText) parts.push(outcomeText);
+  }
+  stratFeedback.style.display = 'block';
+  stratFeedback.className = 'strat-feedback ' + (result.was_correct ? 'correct' : 'wrong');
+  stratFeedback.innerHTML = parts.join('<br>');
 }
 
 stratStartBtn.addEventListener('click', async () => {
   stratStartBtn.disabled = true;
   stratStartBtn.textContent = 'Dealing…';
 
-  const num_decks   = parseInt(document.getElementById('stratNumDecks').value);
-  const num_hands   = parseInt(document.getElementById('stratNumHands').value);
-  const penetration = parseFloat(document.getElementById('stratPenetration').value);
+  const num_decks          = parseInt(document.getElementById('stratNumDecks').value);
+  const num_hands          = parseInt(document.getElementById('stratNumHands').value);
+  const penetration        = parseFloat(document.getElementById('stratPenetration').value);
+  const dealer_hits_soft17 = document.getElementById('stratDealerRule').value === 'h17';
+  const double_after_split = document.getElementById('stratDas').value === 'on';
+  const live_mode          = document.getElementById('stratLiveMode').value === 'on';
 
   const res = await fetch('/api/strategy/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ num_decks, num_hands, penetration }),
+    body: JSON.stringify({ num_decks, num_hands, penetration, dealer_hits_soft17, double_after_split, live_mode }),
   });
 
   stratStartBtn.disabled = false;
-  stratStartBtn.textContent = 'Start Hands';
+  stratStartBtn.textContent = 'Start Playing';
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -1345,17 +1477,24 @@ stratStartBtn.addEventListener('click', async () => {
 
   const session = await res.json();
   stratSessionId = session.session_id;
+  stratLiveMode  = live_mode;
 
   stratSetupPanel.style.display = 'none';
   stratSummaryPanel.classList.remove('active');
   stratGameArea.classList.add('active');
+  stratCheckCountBtn.style.display = live_mode ? '' : 'none';
+  stratCountDisplay.style.display = 'none';
+  stratFeedback.style.display = 'none';
 
-  updateStratProgress(session);
-  renderStratHand(session.hand);
+  renderStratRound(session);
 });
 
+function setStratActionButtonsDisabled(disabled) {
+  ['actHit', 'actStand', 'actDouble', 'actSplit'].forEach(id => document.getElementById(id).disabled = disabled);
+}
+
 async function sendStratAction(action) {
-  ['actHit', 'actStand', 'actDouble', 'actSplit'].forEach(id => document.getElementById(id).disabled = true);
+  setStratActionButtonsDisabled(true);
 
   const res = await fetch('/api/strategy/action', {
     method: 'POST',
@@ -1366,50 +1505,13 @@ async function sendStratAction(action) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     alert(err.error || 'Something went wrong.');
+    setStratActionButtonsDisabled(false);
     return;
   }
 
   const { result, session } = await res.json();
-
-  stratFeedback.style.display = 'block';
-  stratFeedback.className = 'strat-feedback ' + (result.was_correct ? 'correct' : 'wrong');
-  stratFeedback.textContent = result.was_correct
-    ? `✓ Correct — ${ACTION_NAMES[result.action_taken]} was right.`
-    : `✗ Not quite — basic strategy says ${ACTION_NAMES[result.correct_action]}, you chose ${ACTION_NAMES[result.action_taken]}.`;
-
-  updateStratProgress(session);
-
-  if (!result.hand_finished) {
-    // Hand continues (a Hit that didn't bust) — re-render from the live hand.
-    renderStratHand(session.hand);
-    document.getElementById('actDouble').disabled = true; // never legal after the first move
-    document.getElementById('actSplit').disabled  = true;
-    return;
-  }
-
-  // Hand is over — reveal the dealer's full hand and the outcome.
-  stratDealerCards.innerHTML = result.dealer_cards.map(c => miniCardHTML(c)).join('');
-  stratDealerTotal.textContent = result.dealer_total ?? '';
-  stratPlayerCards.innerHTML = result.player_cards.map(c => miniCardHTML(c)).join('');
-  stratPlayerTotal.textContent = result.player_total ?? '';
-
-  stratActions.style.display = 'none';
-
-  const outcomeText = {
-    win:  '🎉 You won this hand.',
-    loss: '❌ You lost this hand.',
-    push: '🤝 Push — a tie with the dealer.',
-    split: '✂️ Split scored for strategy only — not replayed as two hands.',
-  }[result.outcome] || '';
-  stratOutcome.style.display = 'block';
-  stratOutcome.innerHTML = outcomeText;
-
-  if (session.done) {
-    showStratSummary(session);
-  } else {
-    window.__stratPendingHand = session.hand;
-    stratNextBtn.style.display = 'block';
-  }
+  showStratFeedback(result);
+  renderStratRound(session);
 }
 
 document.getElementById('actHit').addEventListener('click', () => sendStratAction('H'));
@@ -1417,50 +1519,98 @@ document.getElementById('actStand').addEventListener('click', () => sendStratAct
 document.getElementById('actDouble').addEventListener('click', () => sendStratAction('D'));
 document.getElementById('actSplit').addEventListener('click', () => sendStratAction('P'));
 
-stratNextBtn.addEventListener('click', async () => {
-  // The next hand was already dealt server-side; just re-fetch current view
-  // by re-rendering from the session snapshot we already have. We stashed it
-  // on the button via dataset in showResultForNextHand — simplest: refetch
-  // isn't needed since apply_action's `session.hand` already holds it.
-  renderStratHand(window.__stratPendingHand);
-  stratActions.style.display = 'flex';
+stratHintBtn.addEventListener('click', async () => {
+  const res = await fetch('/api/strategy/hint', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: stratSessionId }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.error || 'Could not get a hint right now.');
+    return;
+  }
+
+  const { hint, session } = await res.json();
+  stratFeedback.style.display = 'block';
+  stratFeedback.className = 'strat-feedback correct';
+  stratFeedback.innerHTML = `💡 Hint: basic strategy says <strong>${ACTION_NAMES[hint.action]}</strong>.`;
+  renderStratRound(session);
 });
 
-function showStratSummary(session) {
+stratCheckCountBtn.addEventListener('click', async () => {
+  const res = await fetch('/api/strategy/check-count', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: stratSessionId }),
+  });
+  if (!res.ok) return;
+
+  const count = await res.json();
+  stratCountDisplay.style.display = 'block';
+  stratCountDisplay.textContent = `Running count: ${fmtCount(count.running_count)}`
+    + (count.true_count !== null ? ` · True count: ${fmtCount(count.true_count)}` : '');
+});
+
+stratStopBtn.addEventListener('click', async () => {
+  const res = await fetch('/api/strategy/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: stratSessionId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.error || 'Could not stop the session.');
+    return;
+  }
+  const { summary } = await res.json();
+  showStratSummary(summary);
+});
+
+function showStratSummary(summary) {
   stratGameArea.classList.remove('active');
   stratSummaryPanel.classList.add('active');
 
-  const pct = session.total_decisions ? Math.round(100 * session.correct_decisions / session.total_decisions) : 0;
-  document.getElementById('stratSummaryTitle').textContent = `${pct}% Strategy Accuracy`;
+  document.getElementById('stratSummaryTitle').textContent = `${summary.accuracy}% Strategy Accuracy`;
 
-  document.getElementById('stratSummaryStats').innerHTML = `
-    <div class="stat-row"><span>Decisions correct</span><strong>${session.correct_decisions} / ${session.total_decisions}</strong></div>
-    <div class="stat-row"><span>Hands played</span><strong>${session.hands_played}</strong></div>
-    <div class="stat-row"><span>Wins</span><strong>${session.wins}</strong></div>
-    <div class="stat-row"><span>Losses</span><strong>${session.losses}</strong></div>
-    <div class="stat-row"><span>Pushes</span><strong>${session.pushes}</strong></div>
+  let statsHTML = `
+    <div class="stat-row"><span>Decisions correct</span><strong>${summary.correct_decisions} / ${summary.total_decisions}</strong></div>
+    <div class="stat-row"><span>Rounds played</span><strong>${summary.rounds_played}</strong></div>
+    <div class="stat-row"><span>Hands played</span><strong>${summary.hands_played}</strong></div>
+    <div class="stat-row"><span>Wins</span><strong>${summary.wins}</strong></div>
+    <div class="stat-row"><span>Losses</span><strong>${summary.losses}</strong></div>
+    <div class="stat-row"><span>Pushes</span><strong>${summary.pushes}</strong></div>
+    <div class="stat-row"><span>Hints used</span><strong>${summary.hint_used_count}</strong></div>
   `;
+  if ('deviation_accuracy' in summary) {
+    statsHTML += `
+      <div class="stat-row"><span>Deviation accuracy (Live mode)</span>
+        <strong>${summary.deviation_accuracy}% (${summary.deviation_correct}/${summary.deviation_total})</strong></div>
+    `;
+  }
+  document.getElementById('stratSummaryStats').innerHTML = statsHTML;
 
   logHistory({
     mode: 'strategy',
-    correct_decisions: session.correct_decisions,
-    total_decisions: session.total_decisions,
-    num_decks: session.num_decks,
-    num_hands: session.num_hands,
-    wins: session.wins,
-    losses: session.losses,
-    pushes: session.pushes,
+    correct_decisions: summary.correct_decisions,
+    total_decisions: summary.total_decisions,
+    num_decks: stratSession ? stratSession.num_decks : null,
+    num_hands: stratSession ? stratSession.num_hands : null,
+    wins: summary.wins,
+    losses: summary.losses,
+    pushes: summary.pushes,
   });
 }
 
 function resetStratToMenu() {
   stratSessionId = null;
+  stratSession   = null;
   stratGameArea.classList.remove('active');
   stratSummaryPanel.classList.remove('active');
   stratSetupPanel.style.display = '';
 }
 
-stratBackBtn.addEventListener('click', resetStratToMenu);
 stratPlayAgainBtn.addEventListener('click', resetStratToMenu);
 </script>
 </body>

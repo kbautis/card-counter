@@ -1,7 +1,7 @@
 """
 Basic Strategy - Test Suite
 Tests cover hand_total, is_pair, and correct_action against well-known
-basic strategy decision points (S17, DAS, no surrender).
+basic strategy decision points across the H17/S17 x DAS/no-DAS matrix.
 """
 import pytest
 import sys
@@ -15,6 +15,19 @@ from basic_strategy import (
     action_name,
     HIT, STAND, DOUBLE, SPLIT,
 )
+
+# Baseline ruleset used by tests that aren't specifically exercising a
+# H17/S17 or DAS divergence: S17, DAS on.
+S17, H17 = False, True
+DAS_ON, DAS_OFF = True, False
+
+
+def _action(player_ranks, dealer_upcard, dealer_hits_soft17=S17, double_after_split=DAS_ON,
+            can_double=True, can_split=True):
+    return correct_action(
+        player_ranks, dealer_upcard, dealer_hits_soft17, double_after_split,
+        can_double=can_double, can_split=can_split,
+    )
 
 
 class TestHandTotal:
@@ -73,85 +86,172 @@ class TestActionName:
 
 class TestCorrectActionHardTotals:
     def test_hard_8_always_hits(self):
-        assert correct_action(['5', '3'], '6') == HIT
+        assert _action(['5', '3'], '6') == HIT
 
     def test_hard_11_doubles_vs_low_and_mid(self):
-        assert correct_action(['6', '5'], '6') == DOUBLE
-        assert correct_action(['6', '5'], '10') == DOUBLE
+        assert _action(['6', '5'], '6') == DOUBLE
+        assert _action(['6', '5'], '10') == DOUBLE
 
-    def test_hard_11_vs_ace_hits(self):
-        assert correct_action(['6', '5'], 'A') == HIT
+    def test_hard_11_vs_ace_hits_under_s17(self):
+        assert _action(['6', '5'], 'A', dealer_hits_soft17=S17) == HIT
+
+    def test_hard_11_vs_ace_doubles_under_h17(self):
+        assert _action(['6', '5'], 'A', dealer_hits_soft17=H17) == DOUBLE
 
     def test_hard_12_stands_vs_4_5_6(self):
-        assert correct_action(['7', '5'], '4') == STAND
-        assert correct_action(['7', '5'], '6') == STAND
+        assert _action(['7', '5'], '4') == STAND
+        assert _action(['7', '5'], '6') == STAND
 
     def test_hard_12_hits_vs_2_3_and_7plus(self):
-        assert correct_action(['7', '5'], '2') == HIT
-        assert correct_action(['7', '5'], '7') == HIT
+        assert _action(['7', '5'], '2') == HIT
+        assert _action(['7', '5'], '7') == HIT
 
     def test_hard_16_stands_vs_6_hits_vs_10(self):
-        assert correct_action(['10', '6'], '6') == STAND
-        assert correct_action(['10', '6'], '10') == HIT
+        assert _action(['10', '6'], '6') == STAND
+        assert _action(['10', '6'], '10') == HIT
 
     def test_hard_17_always_stands(self):
-        assert correct_action(['10', '7'], 'A') == STAND
+        assert _action(['10', '7'], 'A') == STAND
 
     def test_double_downgrades_to_hit_when_illegal(self):
         # Hard 11 vs 6 wants Double, but if it's not the first move, Hit instead.
-        assert correct_action(['6', '5'], '6', can_double=False) == HIT
+        assert _action(['6', '5'], '6', can_double=False) == HIT
 
 
 class TestCorrectActionSoftTotals:
-    def test_soft_18_stands_vs_2(self):
-        assert correct_action(['A', '7'], '2') == STAND
+    def test_soft_18_stands_vs_2_under_s17(self):
+        assert _action(['A', '7'], '2', dealer_hits_soft17=S17) == STAND
+
+    def test_soft_18_doubles_vs_2_under_h17(self):
+        # H17: A,7 vs 2 is Ds (double if allowed) — differs from S17 (plain stand)
+        assert _action(['A', '7'], '2', dealer_hits_soft17=H17) == DOUBLE
+
+    def test_soft_18_ds_falls_back_to_stand_when_double_illegal(self):
+        assert _action(['A', '7'], '2', dealer_hits_soft17=H17, can_double=False) == STAND
 
     def test_soft_18_doubles_vs_4(self):
-        assert correct_action(['A', '7'], '4') == DOUBLE
+        assert _action(['A', '7'], '4') == DOUBLE
 
     def test_soft_18_hits_vs_9(self):
-        assert correct_action(['A', '7'], '9') == HIT
+        assert _action(['A', '7'], '9') == HIT
+
+    def test_soft_19_never_doubles_vs_6_under_s17(self):
+        assert _action(['A', '8'], '6', dealer_hits_soft17=S17) == STAND
+
+    def test_soft_19_doubles_vs_6_under_h17(self):
+        assert _action(['A', '8'], '6', dealer_hits_soft17=H17) == DOUBLE
 
     def test_soft_13_hits_vs_2(self):
-        assert correct_action(['A', '2'], '2') == HIT
+        assert _action(['A', '2'], '2') == HIT
 
     def test_soft_20_always_stands(self):
-        assert correct_action(['A', '9'], '6') == STAND
+        assert _action(['A', '9'], '6') == STAND
 
 
 class TestCorrectActionPairs:
     def test_aces_always_split(self):
-        assert correct_action(['A', 'A'], '2') == SPLIT
-        assert correct_action(['A', 'A'], 'A') == SPLIT
+        assert _action(['A', 'A'], '2') == SPLIT
+        assert _action(['A', 'A'], 'A') == SPLIT
 
     def test_tens_never_split(self):
-        assert correct_action(['10', 'K'], '6') == STAND
+        assert _action(['10', 'K'], '6') == STAND
 
     def test_eights_always_split(self):
-        assert correct_action(['8', '8'], 'A') == SPLIT
+        assert _action(['8', '8'], 'A') == SPLIT
 
     def test_fives_treated_as_hard_ten(self):
         # 5,5 should never split — plays like a hard 10
-        assert correct_action(['5', '5'], '6') == DOUBLE
-        assert correct_action(['5', '5'], '10') == HIT
+        assert _action(['5', '5'], '6') == DOUBLE
+        assert _action(['5', '5'], '10') == HIT
 
     def test_nines_split_vs_6_stand_vs_7(self):
-        assert correct_action(['9', '9'], '6') == SPLIT
-        assert correct_action(['9', '9'], '7') == STAND
+        assert _action(['9', '9'], '6') == SPLIT
+        assert _action(['9', '9'], '7') == STAND
 
     def test_split_downgrades_to_hit_when_illegal(self):
-        assert correct_action(['8', '8'], 'A', can_split=False) == HIT
+        assert _action(['8', '8'], 'A', can_split=False) == HIT
 
     def test_pair_check_skipped_when_split_illegal_and_totals_used(self):
         # 6,6 with split disallowed should fall back to hard-12 logic
-        assert correct_action(['6', '6'], '5', can_split=False) == STAND
+        assert _action(['6', '6'], '5', can_split=False) == STAND
 
 
 class TestCorrectActionValidation:
     def test_single_card_raises(self):
         with pytest.raises(ValueError):
-            correct_action(['5'], '6')
+            _action(['5'], '6')
 
     def test_unknown_dealer_upcard_raises(self):
         with pytest.raises(ValueError):
-            correct_action(['5', '6'], 'X')
+            _action(['5', '6'], 'X')
+
+    def test_non_bool_dealer_hits_soft17_raises(self):
+        with pytest.raises(ValueError):
+            correct_action(['5', '6'], '6', dealer_hits_soft17='no', double_after_split=True)
+
+    def test_non_bool_double_after_split_raises(self):
+        with pytest.raises(ValueError):
+            correct_action(['5', '6'], '6', dealer_hits_soft17=False, double_after_split='no')
+
+
+class TestDasDependentPairCells:
+    """
+    All 5 pair cells whose chart value depends on double_after_split,
+    checked under both DAS on and DAS off, and confirmed ruleset-independent
+    (H17 vs S17) since the pairs table is shared.
+    """
+
+    @pytest.mark.parametrize('dealer_hits_soft17', [S17, H17])
+    def test_six_six_vs_2(self, dealer_hits_soft17):
+        assert _action(['6', '6'], '2', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_ON) == SPLIT
+        # DAS off: 6,6 plays as hard 12 vs 2 -> Hit
+        assert _action(['6', '6'], '2', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_OFF) == HIT
+
+    @pytest.mark.parametrize('dealer_hits_soft17', [S17, H17])
+    def test_four_four_vs_5(self, dealer_hits_soft17):
+        assert _action(['4', '4'], '5', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_ON) == SPLIT
+        # DAS off: 4,4 plays as hard 8 -> always Hit
+        assert _action(['4', '4'], '5', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_OFF) == HIT
+
+    @pytest.mark.parametrize('dealer_hits_soft17', [S17, H17])
+    def test_four_four_vs_6(self, dealer_hits_soft17):
+        assert _action(['4', '4'], '6', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_ON) == SPLIT
+        assert _action(['4', '4'], '6', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_OFF) == HIT
+
+    @pytest.mark.parametrize('dealer_hits_soft17', [S17, H17])
+    def test_three_three_vs_2(self, dealer_hits_soft17):
+        assert _action(['3', '3'], '2', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_ON) == SPLIT
+        # DAS off: 3,3 plays as hard 6 -> below 8, default Hit
+        assert _action(['3', '3'], '2', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_OFF) == HIT
+
+    @pytest.mark.parametrize('dealer_hits_soft17', [S17, H17])
+    def test_three_three_vs_3(self, dealer_hits_soft17):
+        assert _action(['3', '3'], '3', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_ON) == SPLIT
+        assert _action(['3', '3'], '3', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_OFF) == HIT
+
+    @pytest.mark.parametrize('dealer_hits_soft17', [S17, H17])
+    def test_two_two_vs_2(self, dealer_hits_soft17):
+        assert _action(['2', '2'], '2', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_ON) == SPLIT
+        # DAS off: 2,2 plays as hard 4 -> below 8, default Hit
+        assert _action(['2', '2'], '2', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_OFF) == HIT
+
+    @pytest.mark.parametrize('dealer_hits_soft17', [S17, H17])
+    def test_two_two_vs_3(self, dealer_hits_soft17):
+        assert _action(['2', '2'], '3', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_ON) == SPLIT
+        assert _action(['2', '2'], '3', dealer_hits_soft17=dealer_hits_soft17, double_after_split=DAS_OFF) == HIT
+
+    def test_pairs_not_das_dependent_are_ruleset_independent(self):
+        # 8,8 vs A always splits regardless of DAS or H17/S17
+        for h17 in (S17, H17):
+            for das in (DAS_ON, DAS_OFF):
+                assert _action(['8', '8'], 'A', dealer_hits_soft17=h17, double_after_split=das) == SPLIT
+
+
+class TestH17VsS17HardTotalDivergence:
+    def test_eleven_vs_ace_is_the_clearest_divergence(self):
+        assert _action(['6', '5'], 'A', dealer_hits_soft17=S17) == HIT
+        assert _action(['6', '5'], 'A', dealer_hits_soft17=H17) == DOUBLE
+
+    def test_ace_eight_vs_six_diverges(self):
+        assert _action(['A', '8'], '6', dealer_hits_soft17=S17) == STAND
+        assert _action(['A', '8'], '6', dealer_hits_soft17=H17) == DOUBLE
